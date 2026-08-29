@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "dim_customer",
+    "description": "Temp/demo Gold dimension built with NB_GOLD_LOADER_FUNCTIONS, sourced from the FMD demo Sales_vCustomers / Sales_BuyingGroups shortcuts."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "0a4c4bab-13f1-4c7f-aab1-48a9d36244a2"
+  }
+}

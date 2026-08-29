@@ -1,0 +1,90 @@
+# Deploys FabricFramework by triggering the single NB_DEPLOY_ALL notebook already
+# imported into Fabric (see FMD_FRAMEWORK_DEPLOYMENT.md for the one-time bootstrap step).
+# NB_DEPLOY_ALL re-downloads src/ and config/ from this repo's `main` branch on every
+# run and creates/updates every item accordingly -- this pipeline's only job is to
+# start that run, once per environment, in order, with an approval gate before Test
+# and before Production.
+#
+# Required variable group `fabric-framework-secrets`:
+#   FABRIC_CLIENT_ID, FABRIC_CLIENT_SECRET, FABRIC_TENANT_ID   -- service principal
+#   FABRIC_WORKSPACE_ID, FABRIC_NOTEBOOK_ID                    -- where NB_DEPLOY_ALL lives
+#
+# Required ADO Environments (Pipelines -> Environments): fabricframework-dev,
+# fabricframework-test, fabricframework-prod -- add required reviewers on test/prod.
+
+trigger:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: fabric-framework-secrets
+
+stages:
+  - stage: Dev
+    jobs:
+      - deployment: DeployDev
+        environment: fabricframework-dev
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: UsePythonVersion@0
+                  inputs: { versionSpec: '3.11' }
+                - script: pip install -r deploy/requirements.txt
+                  displayName: Install dependencies
+                - script: python deploy/run_notebook.py --environment development
+                  displayName: Run NB_DEPLOY_ALL (development)
+                  env:
+                    FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
+                    FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
+                    FABRIC_TENANT_ID: $(FABRIC_TENANT_ID)
+                    FABRIC_WORKSPACE_ID: $(FABRIC_WORKSPACE_ID)
+                    FABRIC_NOTEBOOK_ID: $(FABRIC_NOTEBOOK_ID)
+
+  - stage: Test
+    dependsOn: Dev
+    jobs:
+      - deployment: DeployTest
+        environment: fabricframework-test   # approval gate lives on this ADO Environment
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: UsePythonVersion@0
+                  inputs: { versionSpec: '3.11' }
+                - script: pip install -r deploy/requirements.txt
+                - script: python deploy/run_notebook.py --environment test
+                  displayName: Run NB_DEPLOY_ALL (test)
+                  env:
+                    FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
+                    FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
+                    FABRIC_TENANT_ID: $(FABRIC_TENANT_ID)
+                    FABRIC_WORKSPACE_ID: $(FABRIC_WORKSPACE_ID)
+                    FABRIC_NOTEBOOK_ID: $(FABRIC_NOTEBOOK_ID)
+
+  - stage: Prod
+    dependsOn: Test
+    jobs:
+      - deployment: DeployProd
+        environment: fabricframework-prod   # approval gate lives on this ADO Environment too
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: UsePythonVersion@0
+                  inputs: { versionSpec: '3.11' }
+                - script: pip install -r deploy/requirements.txt
+                - script: python deploy/run_notebook.py --environment production
+                  displayName: Run NB_DEPLOY_ALL (production)
+                  env:
+                    FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
+                    FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
+                    FABRIC_TENANT_ID: $(FABRIC_TENANT_ID)
+                    FABRIC_WORKSPACE_ID: $(FABRIC_WORKSPACE_ID)
+                    FABRIC_NOTEBOOK_ID: $(FABRIC_NOTEBOOK_ID)

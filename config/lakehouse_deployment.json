@@ -1,0 +1,19 @@
+[     
+     {
+            "name": "LH_DATA_LANDINGZONE.Lakehouse",
+            "type": "Lakehouse",
+            "id": "4b4840bc-5a9f-434e-8345-3f528d1f39bf"
+        },
+        {
+            "name": "LH_BRONZE_LAYER.Lakehouse",
+            "type": "Lakehouse",
+            "id": "5eafdc67-2e0a-41fe-acb7-ca98e2c3e7af"
+        },
+        {
+            "name": "LH_SILVER_LAYER.Lakehouse",
+            "type": "Lakehouse",
+            "id": "1c5620b3-93ce-4225-b128-9cd03d50e281"
+        }
+
+    
+]
