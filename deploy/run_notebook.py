@@ -56,11 +56,9 @@ def main() -> None:
     headers = {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
 
     body = {
-        "executionData": {
-            "parameters": {
-                "target_environments_csv": {"value": args.environment, "type": "string"}
-            }
-        }
+        "parameters": [
+            {"name": "target_environments_csv", "type": "Text", "value": args.environment}
+        ]
     }
 
     print(f"Starting NB_DEPLOY_ALL for environment(s): '{args.environment or 'ALL'}'")
