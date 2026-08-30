@@ -36,7 +36,7 @@
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# PARAMETERS CELL ********************
 
 # Parameters
 silver_entity_name = ""   # optional catalog.SilverEntity.Name filter -- empty = every active row
@@ -45,10 +45,7 @@ silver_entity_name = ""   # optional catalog.SilverEntity.Name filter -- empty =
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": [
-# META     "parameters"
-# META   ]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

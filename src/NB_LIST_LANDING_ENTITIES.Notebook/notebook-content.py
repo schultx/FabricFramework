@@ -31,7 +31,7 @@
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# PARAMETERS CELL ********************
 
 # Parameters
 connector_type = ""   # catalog.Connection.Type -- e.g. "SQL" or "FILE" -- required
@@ -40,10 +40,7 @@ connector_type = ""   # catalog.Connection.Type -- e.g. "SQL" or "FILE" -- requi
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": [
-# META     "parameters"
-# META   ]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

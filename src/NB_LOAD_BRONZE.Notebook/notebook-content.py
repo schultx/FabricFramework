@@ -33,7 +33,7 @@
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# PARAMETERS CELL ********************
 
 # Parameters
 bronze_entity_name = ""   # optional catalog.BronzeEntity.Name filter -- empty = every active row
@@ -42,10 +42,7 @@ bronze_entity_name = ""   # optional catalog.BronzeEntity.Name filter -- empty =
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": [
-# META     "parameters"
-# META   ]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************
