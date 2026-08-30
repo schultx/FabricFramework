@@ -13,12 +13,12 @@
           "secureOutput": false
         },
         "typeProperties": {
-          "notebookId": "__NB_LIST_LANDING_ENTITIES_ID__",
+          "notebookId": "__NB_LIST_ACTIVE_TABLES_ID__",
           "workspaceId": "__CODE_WORKSPACE_ID__",
           "parameters": {
             "connector_type": {
               "value": {
-                "value": "SQL",
+                "value": "Sql",
                 "type": "Expression"
               },
               "type": "string"
@@ -58,7 +58,7 @@
                 "source": {
                   "type": "AzureSqlSource",
                   "sqlReaderQuery": {
-                    "value": "@if(empty(item().SourceQuery), concat('SELECT * FROM ', item().SourceSchema, '.', item().SourceObject), item().SourceQuery)",
+                    "value": "@item().SourceQuery",
                     "type": "Expression"
                   },
                   "queryTimeout": "02:00:00",

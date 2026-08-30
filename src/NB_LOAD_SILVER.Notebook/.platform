@@ -3,7 +3,7 @@
   "metadata": {
     "type": "Notebook",
     "displayName": "NB_LOAD_SILVER",
-    "description": "Generic Bronze -> Silver loader for the shared logic reused by 2+ Gold objects. Only deployed when an environment sets include_silver: true. Loops over every active catalog.SilverEntity row in one Spark session (or just silver_entity_name, if set)."
+    "description": "Orchestrates the Silver-layer per-table notebooks (%run-chained, same shape as NB_LOAD_GOLD). Only deployed when an environment sets include_silver: true. Currently wired to the demo table: sil_customer."
   },
   "config": {
     "version": "2.0",

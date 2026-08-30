@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "sil_customer",
+    "description": "Silver-layer 1:1 reshape of Bronze.dbo.customer, kept to exercise the NB_LOAD_SILVER/PL_LOAD_SILVER mechanism end to end. Demo pair with dim_customer/fact_signup, built on demodata/customer.csv."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "a20ccb3a-e413-4ab9-a4e8-af2412f4845e"
+  }
+}

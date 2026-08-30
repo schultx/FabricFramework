@@ -1,5 +1,5 @@
--- Stratum metadata catalog
--- Deployed once (and re-run safely on every deploy) into SQL_STRATUM_CATALOG by
+-- Keystone metadata catalog
+-- Deployed once (and re-run safely on every deploy) into SQL_METADATA_DATABASE by
 -- setup/NB_DEPLOY.ipynb. Every statement is idempotent (guarded on existence) so
 -- re-running this file never fails on an already-deployed database.
 --
@@ -7,9 +7,7 @@
 -- SQL (pyodbc doesn't support the SSMS batch separator); NB_DEPLOY splits the file
 -- on that marker and sends each batch as its own statement.
 
-IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'catalog') EXEC('CREATE SCHEMA catalog')
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'gold') EXEC('CREATE SCHEMA gold')
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'ingestion') EXEC('CREATE SCHEMA ingestion')
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'ai') EXEC('CREATE SCHEMA ai')
 GO
@@ -19,88 +17,54 @@ IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'audit') EXEC('CREATE SCHE
 GO
 
 -- ============================================================
--- catalog -- connections, sources, and one entity table per layer
+-- ingestion -- a lean 3-level hierarchy: Connection -> Database -> Table.
+-- Deliberately NOT one table per pipeline stage (no separate Landing/Bronze/
+-- Silver entity tables) -- a single active ingestion.Table row drives a
+-- table's entire Source -> Landing -> Bronze flow. Silver and Gold are
+-- hand-written, per-table notebooks (%run-chained by NB_LOAD_SILVER /
+-- NB_LOAD_GOLD), not metadata-loop-driven, so neither layer has a table of
+-- its own in this schema.
 -- ============================================================
 
-IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'catalog' AND t.name = 'Connection')
-CREATE TABLE [catalog].[Connection] (
+IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Connection')
+CREATE TABLE [ingestion].[Connection] (
     [ConnectionId]   INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [ConnectionGuid] UNIQUEIDENTIFIER NOT NULL,          -- the Fabric Connection item's GUID
     [Name]           VARCHAR(200) NOT NULL,
-    [Type]           VARCHAR(50)  NOT NULL,              -- SQL | ADLS | SFTP | HTTP | ONELAKE
+    [ConnectionType] VARCHAR(10)  NOT NULL,              -- Sql | File
+    [ConnectionGuid] UNIQUEIDENTIFIER NOT NULL,           -- the Fabric Connection item's GUID
     [IsActive]       BIT NOT NULL DEFAULT 1
 )
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'catalog' AND t.name = 'Source')
-CREATE TABLE [catalog].[Source] (
-    [SourceId]     INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [ConnectionId] INT NOT NULL REFERENCES [catalog].[Connection]([ConnectionId]),
-    [Name]         VARCHAR(100) NOT NULL,
-    [Namespace]    VARCHAR(100) NOT NULL,                -- prefix used for Bronze table names
+-- One row per database (Sql) or container/filesystem (File) within a Connection.
+IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Database')
+CREATE TABLE [ingestion].[Database] (
+    [DatabaseId]   INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [ConnectionId] INT NOT NULL REFERENCES [ingestion].[Connection]([ConnectionId]),
+    [Name]         VARCHAR(200) NOT NULL,                 -- source database name (Sql) or container/filesystem name (File)
     [IsActive]     BIT NOT NULL DEFAULT 1
 )
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'catalog' AND t.name = 'LandingEntity')
-CREATE TABLE [catalog].[LandingEntity] (
-    [LandingEntityId]    BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [SourceId]           INT NOT NULL REFERENCES [catalog].[Source]([SourceId]),
-    [SourceSchema]       NVARCHAR(100) NULL,
-    [SourceObject]       NVARCHAR(200) NOT NULL,         -- source table/query name
-    [SourceQuery]        NVARCHAR(MAX) NULL,             -- optional custom SELECT; NULL = SELECT *
-    [FilePath]           NVARCHAR(500) NOT NULL,         -- target folder under Landing/Files/
-    [FileType]           VARCHAR(20)   NOT NULL DEFAULT 'parquet',
-    [IsIncremental]      BIT NOT NULL DEFAULT 0,
-    [IncrementalColumn]  NVARCHAR(100) NULL,
-    [IsActive]           BIT NOT NULL DEFAULT 1
-)
-GO
-
-IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'catalog' AND t.name = 'BronzeEntity')
-CREATE TABLE [catalog].[BronzeEntity] (
-    [BronzeEntityId]   BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [LandingEntityId]  BIGINT NOT NULL REFERENCES [catalog].[LandingEntity]([LandingEntityId]),
-    [Schema]           NVARCHAR(100) NOT NULL,
-    [Name]             NVARCHAR(200) NOT NULL,
-    [PrimaryKeys]      NVARCHAR(200) NOT NULL,           -- comma-separated
-    [CleansingRules]   NVARCHAR(MAX) NULL,               -- JSON array: dedupe/null-handling/explode rules
-    [IsActive]         BIT NOT NULL DEFAULT 1
-)
-GO
-
--- Populated only when an environment is deployed with include_silver = true.
--- A Bronze entity earns a Silver row specifically because its logic is reused by
--- two or more Gold objects -- most Bronze entities never get one.
-IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'catalog' AND t.name = 'SilverEntity')
-CREATE TABLE [catalog].[SilverEntity] (
-    [SilverEntityId]    BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [BronzeEntityId]    BIGINT NOT NULL REFERENCES [catalog].[BronzeEntity]([BronzeEntityId]),
-    [Schema]            NVARCHAR(100) NOT NULL,
-    [Name]              NVARCHAR(200) NOT NULL,
-    [TransformNotebook] NVARCHAR(200) NULL,              -- custom notebook/function reference, if any
+-- One row per table drives its ENTIRE Source -> Landing -> Bronze flow when active.
+IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Table')
+CREATE TABLE [ingestion].[Table] (
+    [TableId]           BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [DatabaseId]        INT NOT NULL REFERENCES [ingestion].[Database]([DatabaseId]),
+    [SourceSchema]      NVARCHAR(100) NULL,
+    [SourceObject]      NVARCHAR(200) NOT NULL,          -- source table/query name
+    [SourceQuery]       NVARCHAR(MAX) NULL,              -- optional custom SELECT override; NULL = SELECT *
+    [FilePath]          NVARCHAR(500) NOT NULL,          -- target folder under Landing/Files/
+    [FileType]          VARCHAR(20)   NOT NULL DEFAULT 'parquet',
+    [BronzeSchema]      NVARCHAR(100) NOT NULL,
+    [BronzeName]        NVARCHAR(200) NOT NULL,
+    [PrimaryKeys]       NVARCHAR(200) NOT NULL,          -- comma-separated: dedupe key AND (LoadType='Delta') the MERGE key
+    [LoadType]          VARCHAR(10)   NOT NULL DEFAULT 'Full',  -- Full | Delta
+    [IncrementalColumn] NVARCHAR(100) NULL,              -- required when LoadType = 'Delta'; drives the watermark filter
+    [DeleteHandling]    VARCHAR(20)   NOT NULL DEFAULT 'None',  -- None | SoftDelete | Reconcile
+    [IsDeletedColumn]   NVARCHAR(100) NULL,              -- required when DeleteHandling = 'SoftDelete'
+    [CleansingRules]    NVARCHAR(MAX) NULL,              -- JSON array: dedupe/null-handling/explode rules
     [IsActive]          BIT NOT NULL DEFAULT 1
-)
-GO
-
--- ============================================================
--- gold -- one entity table, sourcing from Bronze by default, Silver only when configured
--- ============================================================
-
-IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'gold' AND t.name = 'GoldEntity')
-CREATE TABLE [gold].[GoldEntity] (
-    [GoldEntityId]        BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [SourceLayer]         VARCHAR(10)   NOT NULL,        -- bronze | silver
-    [SourceEntityId]      BIGINT        NOT NULL,        -- BronzeEntityId or SilverEntityId, per SourceLayer
-    [EntityType]          VARCHAR(20)   NOT NULL,        -- dimension | fact | bridge
-    [Schema]              NVARCHAR(100) NULL,
-    [Name]                NVARCHAR(200) NOT NULL,
-    [SurrogateKeyColumn]  NVARCHAR(100) NULL,
-    [BusinessKeyColumns]  NVARCHAR(500) NULL,
-    [LoadPattern]         VARCHAR(20)   NOT NULL,        -- scd1 | scd2 | overwrite | append
-    [TransformTemplate]   NVARCHAR(100) NULL,            -- which templated notebook applies
-    [CustomTransformHook] NVARCHAR(200) NULL,            -- escape hatch for genuine one-offs
-    [IsActive]            BIT NOT NULL DEFAULT 1
 )
 GO
 
@@ -124,12 +88,15 @@ GO
 -- runtime -- incremental-load state
 -- ============================================================
 
+-- Repointed at ingestion.Table (EntityType is always 'Table' now -- kept as a
+-- column, not dropped, so a future watermark consumer outside ingestion.Table
+-- doesn't force a schema change here). EntityId = ingestion.Table.TableId.
 IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'runtime' AND t.name = 'LoadWatermark')
 CREATE TABLE [runtime].[LoadWatermark] (
     [WatermarkId]  BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [EntityType]   VARCHAR(20) NOT NULL,                  -- landing | bronze | silver | gold
+    [EntityType]   VARCHAR(20) NOT NULL,
     [EntityId]     BIGINT NOT NULL,
-    [LastValue]    NVARCHAR(100) NULL,
+    [LastValue]    NVARCHAR(100) NULL,                    -- MAX(IncrementalColumn) seen as of LastRunUtc
     [LastRunUtc]   DATETIME2(7) NULL
 )
 GO

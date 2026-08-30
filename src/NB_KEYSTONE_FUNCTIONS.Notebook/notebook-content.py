@@ -111,14 +111,14 @@ def onelake_path(workspace_id: str, lakehouse_id: str, section: Literal["Files",
 # CELL ********************
 
 # ============================================================
-# METADATA CATALOG -- read entity config from SQL_STRATUM_CATALOG (Integration workspace)
+# METADATA CATALOG -- read entity config from SQL_METADATA_DATABASE (Integration workspace)
 # ============================================================
 
 import struct
 import pyodbc
 
 
-def _resolve_sql_endpoint(workspace_id: str, database_name: str = "SQL_STRATUM_CATALOG") -> str:
+def _resolve_sql_endpoint(workspace_id: str, database_name: str = "SQL_METADATA_DATABASE") -> str:
     """Look up the SQL connection string (server) for the metadata SQL Database item."""
     resp = requests.get(f"{FABRIC_API}/workspaces/{workspace_id}/items", headers=_fabric_headers())
     resp.raise_for_status()
@@ -157,6 +157,21 @@ def catalog_query(sql: str, params: tuple = ()) -> "list[dict]":
         cursor.execute(sql, params)
         columns = [col[0] for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def catalog_execute(sql: str, params: tuple = ()) -> None:
+    """
+    Run an INSERT/UPDATE/DELETE/MERGE against the metadata catalog (no result
+    rows expected). Used by NB_LOAD_BRONZE to advance runtime.LoadWatermark
+    after a Delta-type load.
+    """
+    conn = catalog_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        conn.commit()
     finally:
         conn.close()
 

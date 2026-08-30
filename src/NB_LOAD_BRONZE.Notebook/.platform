@@ -3,7 +3,7 @@
   "metadata": {
     "type": "Notebook",
     "displayName": "NB_LOAD_BRONZE",
-    "description": "Generic, metadata-driven Landing -> Bronze loader. Loops over every active catalog.BronzeEntity row in one Spark session (or just bronze_entity_name, if set)."
+    "description": "Generic, metadata-driven Landing -> Bronze loader. Loops over every active ingestion.Table row in one Spark session (or just bronze_entity_name, if set), overwriting Bronze for LoadType='Full' or MERGE-upserting (with watermark advance and optional Reconcile delete handling) for LoadType='Delta'."
   },
   "config": {
     "version": "2.0",

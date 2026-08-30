@@ -6,15 +6,7 @@
         "typeProperties": {
           "notebookId": "__NB_LOAD_SILVER_ID__",
           "workspaceId": "__CODE_WORKSPACE_ID__",
-          "parameters": {
-            "silver_entity_name": {
-              "value": {
-                "value": "@pipeline().parameters.silver_entity_name",
-                "type": "Expression"
-              },
-              "type": "string"
-            }
-          }
+          "parameters": {}
         },
         "policy": {
           "timeout": "0.12:00:00",
@@ -27,11 +19,6 @@
         "dependsOn": []
       }
     ],
-    "parameters": {
-      "silver_entity_name": {
-        "type": "string",
-        "defaultValue": ""
-      }
-    }
+    "parameters": {}
   }
 }

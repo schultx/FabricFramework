@@ -12,9 +12,9 @@ items:
     type: Notebook
     path: NB_KEYSTONE_FUNCTIONS.Notebook
 
-  - name: NB_LIST_LANDING_ENTITIES
+  - name: NB_LIST_ACTIVE_TABLES
     type: Notebook
-    path: NB_LIST_LANDING_ENTITIES.Notebook
+    path: NB_LIST_ACTIVE_TABLES.Notebook
 
   - name: NB_LOAD_BRONZE
     type: Notebook
@@ -23,6 +23,11 @@ items:
   - name: NB_LOAD_SILVER
     type: Notebook
     path: NB_LOAD_SILVER.Notebook
+    requires_silver: true
+
+  - name: sil_customer
+    type: Notebook
+    path: sil_customer.Notebook
     requires_silver: true
 
   - name: NB_LOAD_GOLD

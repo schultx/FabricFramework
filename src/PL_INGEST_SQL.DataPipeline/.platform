@@ -3,7 +3,7 @@
   "metadata": {
     "type": "DataPipeline",
     "displayName": "PL_INGEST_SQL",
-    "description": "Metadata-driven Source -> Landing copy for SQL-type connections. Looks up every active catalog.LandingEntity row behind a SQL Connection (via NB_LIST_LANDING_ENTITIES), then Copies each one straight into Landing."
+    "description": "Metadata-driven Source -> Landing copy for Sql-type connections. Looks up every active ingestion.Table row behind a Sql Connection (via NB_LIST_ACTIVE_TABLES, which also resolves each row's ready-to-run SourceQuery), then Copies each one straight into Landing."
   },
   "config": {
     "version": "2.0",

@@ -29,8 +29,8 @@
 #
 # Currently wired to the demo pair: `dim_customer` -> `fact_signup`. Add each
 # new dimension notebook above its dependent fact notebook as the business
-# domain grows, or drive this from `gold.GoldEntity` metadata once there are
-# enough Gold objects to warrant a fully generic loop.
+# domain grows -- Gold is deliberately NOT metadata-loop-driven: every object
+# gets its own hand-written notebook, %run-chained here.
 
 # CELL ********************
 

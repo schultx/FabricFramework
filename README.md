@@ -30,13 +30,19 @@ repo specifically.
 - **Gold** — business logic: dimensions (SCD1/SCD2), facts, bridges, ready for
   a semantic model
 
-**Metadata catalog** (`SQL_STRATUM_CATALOG`, in the Integration workspace) drives
-everything: `catalog.Connection` / `catalog.Source` / `catalog.LandingEntity` /
-`catalog.BronzeEntity` / `catalog.SilverEntity` describe what to ingest and how
-to cleanse it; `gold.GoldEntity` describes each Gold object; `ai.FeatureSet`
-registers Silver/Gold entities for AI-team consumption; `runtime.LoadWatermark`
-and `audit.PipelineRun`/`audit.NotebookRun` track incremental state and
-execution history. Full DDL in [`config/metadata_schema.sql`](config/metadata_schema.sql).
+**Metadata catalog** (`SQL_METADATA_DATABASE`, in the Integration workspace)
+drives ingestion with a lean 3-level hierarchy, not one table per pipeline
+stage, in the `ingestion` schema: `ingestion.Connection` (one row per source
+system) -> `ingestion.Database` (one row per database/container within a
+Connection) -> `ingestion.Table` (one row per table drives its entire
+Source -> Landing -> Bronze flow when active — Full or Delta load, optional
+delete handling).
+Silver and Gold are **not** metadata-loop-driven — each is a hand-written,
+per-table notebook, %run-chained together, so neither layer has a catalog
+table of its own. `ai.FeatureSet` registers Silver/Gold entities for AI-team
+consumption; `runtime.LoadWatermark` and `audit.PipelineRun`/
+`audit.NotebookRun` track incremental state and execution history. Full DDL in
+[`config/metadata_schema.sql`](config/metadata_schema.sql).
 
 ## Deployment
 

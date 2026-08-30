@@ -13,12 +13,12 @@
           "secureOutput": false
         },
         "typeProperties": {
-          "notebookId": "__NB_LIST_LANDING_ENTITIES_ID__",
+          "notebookId": "__NB_LIST_ACTIVE_TABLES_ID__",
           "workspaceId": "__CODE_WORKSPACE_ID__",
           "parameters": {
             "connector_type": {
               "value": {
-                "value": "FILE",
+                "value": "File",
                 "type": "Expression"
               },
               "type": "string"
@@ -68,7 +68,7 @@
                       "location": {
                         "type": "AzureBlobFSLocation",
                         "fileSystem": {
-                          "value": "@item().Namespace",
+                          "value": "@item().DatabaseName",
                           "type": "Expression"
                         },
                         "folderPath": {

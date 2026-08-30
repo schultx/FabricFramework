@@ -21,14 +21,17 @@ sidesteps the bug at the root instead of working around it.)
    `Keystone Integration (X)`, `Keystone Code (X)`
 3. Creates `Landing` / `Bronze` / `Gold` lakehouses in Data (+ `Silver` if
    `config/environments.yaml` sets `include_silver: true` for that environment)
-4. Creates the `SQL_STRATUM_CATALOG` SQL Database in Integration and applies
+4. Creates the `SQL_METADATA_DATABASE` SQL Database in Integration and applies
    `config/metadata_schema.sql` (idempotent — safe to re-run)
 5. Deploys every item in `config/items.yaml` into Code (notebooks, pipelines,
-   one Variable Library), patching cross-item ID placeholders (e.g. a
-   pipeline's `__NB_LOAD_BRONZE_ID__`) with the real IDs once they're known
+   one Variable Library) — including `sil_customer`, the hand-written,
+   per-table Silver notebook, for `include_silver` environments — patching
+   cross-item ID placeholders (e.g. a pipeline's `__NB_LOAD_BRONZE_ID__`) with
+   the real IDs once they're known
 6. Seeds `demodata/customer.csv` into `Landing/Files/customer/customer.csv`
-   and registers a demo `catalog.BronzeEntity` row, so `PL_RUN_ALL` has
-   something to load on a first run
+   and registers a demo `ingestion.Connection` / `ingestion.Database` /
+   `ingestion.Table` row (a File-type, full-load ingestion), so `PL_RUN_ALL`
+   has something to load on a first run
 
 Re-running it after a push to `main` is how you redeploy — there's no
 separate "sync" step, and every step is safe to run again (create-if-missing,
@@ -97,19 +100,26 @@ re-import, no second notebook.
 
 ## Adding a real data source
 
-`catalog.Connection` / `catalog.Source` / `catalog.LandingEntity` /
-`catalog.BronzeEntity` are the only rows `PL_INGEST_SQL`, `PL_INGEST_FILE`,
-and `NB_LOAD_BRONZE` need to pick up a new entity — no pipeline or notebook
-changes required for a source of a type the framework already supports:
+`ingestion.Connection` / `ingestion.Database` / `ingestion.Table` are the only
+rows `PL_INGEST_SQL`, `PL_INGEST_FILE`, and `NB_LOAD_BRONZE` need to pick up a
+new table — no pipeline or notebook changes required for a source of a type
+the framework already supports. One active `ingestion.Table` row drives that
+table's entire Source -> Landing -> Bronze flow:
 
 1. Register the actual Fabric Connection for your source (SQL Server, ADLS
    Gen2, etc.) in the Integration workspace, and insert its GUID into
-   `catalog.Connection.ConnectionGuid` with `Type = 'SQL'` or `'FILE'`
-2. Insert a `catalog.Source` row referencing that connection
-3. Insert a `catalog.LandingEntity` row describing the object to copy and
-   where it lands
-4. Insert a `catalog.BronzeEntity` row describing its primary key and any
-   cleansing rules — `PL_LOAD_BRONZE` picks it up on its next run
-5. Only if the cleansed shape will be reused by 2+ Gold objects: add a
-   `catalog.SilverEntity` row and set `include_silver: true` for that
-   environment in `config/environments.yaml`
+   `ingestion.Connection.ConnectionGuid` with `ConnectionType = 'Sql'` or
+   `'File'`
+2. Insert an `ingestion.Database` row referencing that connection (the source
+   database name for `Sql`, or the container/filesystem name for `File`)
+3. Insert an `ingestion.Table` row describing the object to copy, where it
+   lands, its Bronze schema/name, its `PrimaryKeys`, `LoadType`
+   (`'Full'` or `'Delta'`, with `IncrementalColumn` for Delta), and
+   `DeleteHandling` (`'None'` / `'SoftDelete'` / `'Reconcile'`, Delta only) —
+   `PL_LOAD_BRONZE` picks it up on its next run
+4. Only if the cleansed shape will be reused by 2+ Gold objects: hand-write a
+   `sil_<name>.Notebook` (mirroring `dim_customer.Notebook`'s shape — read
+   Bronze via direct OneLake path into a temp view, `%%sql` transform, write
+   to Silver), add it to `config/items.yaml` with `requires_silver: true`,
+   `%run` it from `NB_LOAD_SILVER.Notebook`, and set `include_silver: true`
+   for that environment in `config/environments.yaml`
