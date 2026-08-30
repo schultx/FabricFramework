@@ -18,20 +18,30 @@ sidesteps the bug at the root instead of working around it.)
 
 1. Resolves the target Fabric capacity
 2. Creates/updates the three workspaces: `Keystone Data (X)`,
-   `Keystone Integration (X)`, `Keystone Code (X)`
+   `Keystone Ingestion (X)`, `Keystone Code (X)`
 3. Creates `Landing` / `Bronze` / `Gold` lakehouses in Data (+ `Silver` if
    `config/environments.yaml` sets `include_silver: true` for that environment)
-4. Creates the `SQL_METADATA_DATABASE` SQL Database in Integration and applies
+4. Creates the `SQL_METADATA_DATABASE` SQL Database in Ingestion and applies
    `config/metadata_schema.sql` (idempotent — safe to re-run)
-5. Deploys every item in `config/items.yaml` into Code (notebooks, pipelines,
-   one Variable Library) — including `sil_customer`, the hand-written,
-   per-table Silver notebook, for `include_silver` environments — patching
-   cross-item ID placeholders (e.g. a pipeline's `__NB_LOAD_BRONZE_ID__`) with
-   the real IDs once they're known
+5. Deploys every item in `config/items.yaml` into its target workspace
+   (notebooks, pipelines, one Variable Library) — `PL_INGEST_SQL` and
+   `PL_INGEST_FILE` go into Ingestion, alongside the metadata catalog and
+   source Connections they read; everything else (including `sil_customer`,
+   the hand-written, per-table Silver notebook, for `include_silver`
+   environments) goes into Code — patching cross-item ID placeholders (e.g.
+   a pipeline's `__NB_LOAD_BRONZE_ID__`) with the real IDs once they're known
 6. Seeds `demodata/customer.csv` into `Landing/Files/customer/customer.csv`
    and registers a demo `ingestion.Connection` / `ingestion.Database` /
    `ingestion.Table` row (a File-type, full-load ingestion), so `PL_RUN_ALL`
    has something to load on a first run
+
+`PL_RUN_ALL` (Code) triggers `PL_INGEST_SQL`/`PL_INGEST_FILE` (Ingestion)
+through a bridge notebook, `NB_RUN_REMOTE_PIPELINE`, rather than a direct
+pipeline reference: Fabric's legacy `ExecutePipeline` activity only supports
+pipelines in the *same* workspace as the caller, so `PL_RUN_ALL` calls
+`NB_RUN_REMOTE_PIPELINE` (same workspace, trivial) and that notebook triggers
+the real cross-workspace pipeline run itself via the Job Scheduler REST API,
+blocking until it finishes.
 
 Re-running it after a push to `main` is how you redeploy — there's no
 separate "sync" step, and every step is safe to run again (create-if-missing,
@@ -107,7 +117,8 @@ the framework already supports. One active `ingestion.Table` row drives that
 table's entire Source -> Landing -> Bronze flow:
 
 1. Register the actual Fabric Connection for your source (SQL Server, ADLS
-   Gen2, etc.) in the Integration workspace, and insert its GUID into
+   Gen2, etc.) in the Ingestion workspace — the same workspace `PL_INGEST_SQL`
+   and `PL_INGEST_FILE` themselves deploy into — and insert its GUID into
    `ingestion.Connection.ConnectionGuid` with `ConnectionType = 'Sql'` or
    `'File'`
 2. Insert an `ingestion.Database` row referencing that connection (the source

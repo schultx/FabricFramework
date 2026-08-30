@@ -86,13 +86,13 @@ def data_workspace_name() -> str:
     return code_name.replace(marker, " Data (")
 
 
-def integration_workspace_name() -> str:
-    """Derive '<Project> Integration (X)' from this notebook's own '<Project> Code (X)' workspace name."""
+def ingestion_workspace_name() -> str:
+    """Derive '<Project> Ingestion (X)' from this notebook's own '<Project> Code (X)' workspace name."""
     code_name = notebookutils.runtime.context["currentWorkspaceName"]
     marker = " Code ("
     if marker not in code_name:
         raise ValueError(f"Expected this notebook's workspace name to contain '{marker}', got '{code_name}'")
-    return code_name.replace(marker, " Integration (")
+    return code_name.replace(marker, " Ingestion (")
 
 
 def onelake_path(workspace_id: str, lakehouse_id: str, section: Literal["Files", "Tables"] = "Files", subpath: str = "") -> str:
@@ -111,7 +111,7 @@ def onelake_path(workspace_id: str, lakehouse_id: str, section: Literal["Files",
 # CELL ********************
 
 # ============================================================
-# METADATA CATALOG -- read entity config from SQL_METADATA_DATABASE (Integration workspace)
+# METADATA CATALOG -- read entity config from SQL_METADATA_DATABASE (Ingestion workspace)
 # ============================================================
 
 import struct
@@ -137,7 +137,7 @@ def catalog_connection():
     Open a pyodbc connection to the metadata catalog SQL Database, authenticating
     with this notebook's own Entra identity (no stored password/secret).
     """
-    workspace_id = resolve_workspace_id(integration_workspace_name())
+    workspace_id = resolve_workspace_id(ingestion_workspace_name())
     server, database = _resolve_sql_endpoint(workspace_id)
 
     token = notebookutils.credentials.getToken("https://database.windows.net/.default")

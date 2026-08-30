@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "NB_RUN_REMOTE_PIPELINE",
+    "description": "Triggers a Data Pipeline in another workspace via the Job Scheduler REST API and blocks until it reaches a terminal status, then raises if it didn't succeed. Exists so PL_RUN_ALL (Code) can invoke PL_INGEST_SQL/PL_INGEST_FILE (Ingestion) -- the legacy ExecutePipeline activity only supports same-workspace pipelines, so PL_RUN_ALL calls this notebook instead via a same-workspace TridentNotebook activity, and this notebook does the actual cross-workspace call."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "58ddf439-f846-4a23-ae9e-42f853dd0fff"
+  }
+}

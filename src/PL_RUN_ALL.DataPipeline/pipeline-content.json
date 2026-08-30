@@ -3,36 +3,66 @@
     "activities": [
       {
         "name": "EP_INGEST_SQL",
-        "type": "ExecutePipeline",
+        "type": "TridentNotebook",
         "dependsOn": [],
         "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
           "secureInput": false,
           "secureOutput": false
         },
         "typeProperties": {
-          "pipeline": {
-            "referenceName": "__PL_INGEST_SQL_ID__",
-            "type": "PipelineReference"
-          },
-          "waitOnCompletion": true,
-          "parameters": {}
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_SQL_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
         }
       },
       {
         "name": "EP_INGEST_FILE",
-        "type": "ExecutePipeline",
+        "type": "TridentNotebook",
         "dependsOn": [],
         "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
           "secureInput": false,
           "secureOutput": false
         },
         "typeProperties": {
-          "pipeline": {
-            "referenceName": "__PL_INGEST_FILE_ID__",
-            "type": "PipelineReference"
-          },
-          "waitOnCompletion": true,
-          "parameters": {}
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_FILE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
         }
       },
       {

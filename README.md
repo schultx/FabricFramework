@@ -17,8 +17,8 @@ repo specifically.
 | Workspace | Holds |
 |---|---|
 | `Keystone Data (D/T/P)` | Lakehouses only: `Landing`, `Bronze`, `Gold`, and `Silver` **only if** that environment sets `include_silver: true` |
-| `Keystone Integration (D/T/P)` | The metadata catalog SQL Database + any registered source Connections |
-| `Keystone Code (D/T/P)` | Everything executable: ingestion pipelines, loader notebooks, the Gold function library, one Variable Library |
+| `Keystone Ingestion (D/T/P)` | The metadata catalog SQL Database, any registered source Connections, and the two ingestion pipelines (`PL_INGEST_SQL`, `PL_INGEST_FILE`) that read them |
+| `Keystone Code (D/T/P)` | Everything else executable: `PL_RUN_ALL` and the other orchestration/load pipelines, loader notebooks, the Gold function library, one Variable Library |
 
 **Layers**, deliberately not one-size-fits-all:
 
@@ -30,7 +30,7 @@ repo specifically.
 - **Gold** — business logic: dimensions (SCD1/SCD2), facts, bridges, ready for
   a semantic model
 
-**Metadata catalog** (`SQL_METADATA_DATABASE`, in the Integration workspace)
+**Metadata catalog** (`SQL_METADATA_DATABASE`, in the Ingestion workspace)
 drives ingestion with a lean 3-level hierarchy, not one table per pipeline
 stage, in the `ingestion` schema: `ingestion.Connection` (one row per source
 system) -> `ingestion.Database` (one row per database/container within a

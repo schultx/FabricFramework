@@ -1,7 +1,9 @@
-# Items deployed into the Code workspace of every environment. `path` is the folder
-# under src/ (this repo, downloaded fresh from git on every NB_DEPLOY run).
-# `requires_silver: true` items are only deployed when that environment's
-# `include_silver` flag (environments.yaml) is true.
+# Items deployed into one of this framework's workspaces, per environment. `path`
+# is the folder under src/ (this repo, downloaded fresh from git on every NB_DEPLOY
+# run). `requires_silver: true` items are only deployed when that environment's
+# `include_silver` flag (environments.yaml) is true. `workspace` picks which
+# workspace the item deploys into -- `Code` or `Ingestion` -- and defaults to
+# `Code` when omitted, so most entries don't need to mention it at all.
 
 items:
   - name: VAR_KEYSTONE
@@ -15,6 +17,11 @@ items:
   - name: NB_LIST_ACTIVE_TABLES
     type: Notebook
     path: NB_LIST_ACTIVE_TABLES.Notebook
+
+  - name: NB_RUN_REMOTE_PIPELINE
+    type: Notebook
+    path: NB_RUN_REMOTE_PIPELINE.Notebook
+    workspace: Code
 
   - name: NB_LOAD_BRONZE
     type: Notebook
@@ -45,10 +52,12 @@ items:
   - name: PL_INGEST_SQL
     type: DataPipeline
     path: PL_INGEST_SQL.DataPipeline
+    workspace: Ingestion
 
   - name: PL_INGEST_FILE
     type: DataPipeline
     path: PL_INGEST_FILE.DataPipeline
+    workspace: Ingestion
 
   - name: PL_LOAD_BRONZE
     type: DataPipeline
