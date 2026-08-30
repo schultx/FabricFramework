@@ -89,13 +89,20 @@ print(f"Loading {len(entities)} active Silver entity(ies)")
 
 # CELL ********************
 
-for entity in entities:
-    # Unqualified by lakehouse name -- Bronze is this notebook's own default lakehouse;
-    # only a *sibling* lakehouse (e.g. Gold) would need the 3-part form.
-    bronze_source = f"{entity['BronzeSchema']}.{entity['BronzeName']}"
-    print(f"-- Loading Silver entity '{entity['SilverName']}' from {bronze_source}")
+_silver_data_ws_id = resolve_workspace_id(data_workspace_name())
+_silver_bronze_lh_id = resolve_lakehouse_id(_silver_data_ws_id, "Bronze")
 
-    silver_df = spark.table(bronze_source).withColumn("silver_loaded_datetime", F.current_timestamp())
+for entity in entities:
+    print(f"-- Loading Silver entity '{entity['SilverName']}' from Bronze.{entity['BronzeSchema']}.{entity['BronzeName']}")
+
+    # Read by direct OneLake path, not a Spark-catalog table name -- Bronze is this
+    # notebook's own default lakehouse, and reading it back via spark.table() with even
+    # an unqualified name trips Spark's SQL parser ("spark_catalog requires a
+    # single-part namespace") once a lakehouse is schema-enabled.
+    bronze_path = onelake_path(
+        _silver_data_ws_id, _silver_bronze_lh_id, "Tables", f"{entity['BronzeSchema']}/{entity['BronzeName']}"
+    )
+    silver_df = spark.read.format("delta").load(bronze_path).withColumn("silver_loaded_datetime", F.current_timestamp())
 
     _ensure_schema("Silver", entity["SilverSchema"])
     target_table = f"Silver.{entity['SilverSchema']}.{entity['SilverName']}"

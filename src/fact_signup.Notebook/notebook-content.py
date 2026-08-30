@@ -67,6 +67,26 @@ recreate_table = False
 
 # CELL ********************
 
+# Read Bronze.dbo.customer by direct OneLake path rather than a Spark-catalog table
+# name -- a notebook's own default lakehouse can be written via saveAsTable() using its
+# own name in the path, but reading it back the same way trips Spark's SQL parser
+# ("spark_catalog requires a single-part namespace"). A path read sidesteps catalog
+# resolution entirely and works the same way regardless of which lakehouse is default.
+_data_ws_id = resolve_workspace_id(data_workspace_name())
+_bronze_lh_id = resolve_lakehouse_id(_data_ws_id, "Bronze")
+spark.read.format("delta").load(
+    onelake_path(_data_ws_id, _bronze_lh_id, "Tables", "dbo/customer")
+).createOrReplaceTempView("bronze_customer")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 # MAGIC %%sql
 # MAGIC
 # MAGIC CREATE OR REPLACE TEMPORARY VIEW temp_fact_signup AS
@@ -77,7 +97,7 @@ recreate_table = False
 # MAGIC     -- Degenerate dimension / event grain
 # MAGIC     CAST(SubscriptionDate AS DATE) AS SignupDate,
 # MAGIC     Country
-# MAGIC FROM dbo.customer
+# MAGIC FROM bronze_customer
 
 # METADATA ********************
 
