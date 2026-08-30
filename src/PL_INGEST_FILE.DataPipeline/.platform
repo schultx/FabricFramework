@@ -3,7 +3,7 @@
   "metadata": {
     "type": "DataPipeline",
     "displayName": "PL_INGEST_FILE",
-    "description": "Metadata-driven Source -> Landing copy for FILE-type connections (ADLS Gen2 by default). Looks up every active catalog.LandingEntity row behind a FILE Connection (via NB_LIST_LANDING_ENTITIES), then Copies each file straight into Landing, unmodified."
+    "description": "Metadata-driven Source -> Landing copy for FILE-type connections (ADLS Gen2 by default). A native Lookup against the metadata catalog (via a Connection to SQL_STRATUM_CATALOG) finds every active catalog.LandingEntity row behind a FILE Connection, then Copies each file straight into Landing, unmodified."
   },
   "config": {
     "version": "2.0",

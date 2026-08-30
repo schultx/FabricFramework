@@ -2,28 +2,51 @@
   "properties": {
     "activities": [
       {
-        "name": "NB_LIST_SQL_ENTITIES",
-        "type": "TridentNotebook",
+        "name": "LK_GET_SQL_ENTITIES",
+        "type": "Lookup",
+        "description": "Every active catalog.LandingEntity behind a SQL-type Connection",
         "dependsOn": [],
         "policy": {
           "timeout": "0.01:00:00",
-          "retry": 0,
+          "retry": 2,
           "retryIntervalInSeconds": 30,
           "secureInput": false,
           "secureOutput": false
         },
         "typeProperties": {
-          "notebookId": "__NB_LIST_LANDING_ENTITIES_ID__",
-          "workspaceId": "__CODE_WORKSPACE_ID__",
-          "parameters": {
-            "connector_type": {
-              "value": {
-                "value": "SQL",
-                "type": "Expression"
-              },
-              "type": "string"
+          "source": {
+            "type": "FabricSqlDatabaseSource",
+            "sqlReaderQuery": {
+              "value": "SELECT le.[LandingEntityId], le.[SourceSchema], le.[SourceObject], le.[SourceQuery], le.[FilePath], le.[FileType], s.[Namespace], c.[ConnectionGuid] FROM [catalog].[LandingEntity] le JOIN [catalog].[Source] s ON le.[SourceId] = s.[SourceId] JOIN [catalog].[Connection] c ON s.[ConnectionId] = c.[ConnectionId] WHERE le.[IsActive] = 1 AND s.[IsActive] = 1 AND c.[IsActive] = 1 AND c.[Type] = 'SQL'",
+              "type": "Expression"
+            },
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "datasetSettings": {
+            "annotations": [],
+            "type": "FabricSqlDatabaseTable",
+            "schema": [],
+            "typeProperties": {
+              "schema": "catalog",
+              "table": "LandingEntity"
+            },
+            "connectionSettings": {
+              "name": "SQL_STRATUM_CATALOG",
+              "properties": {
+                "annotations": [],
+                "type": "FabricSqlDatabase",
+                "typeProperties": {
+                  "workspaceId": "__INTEGRATION_WORKSPACE_ID__",
+                  "artifactId": "__CATALOG_DATABASE_ID__"
+                },
+                "externalReferences": {
+                  "connection": "__CATALOG_CONNECTION_ID__"
+                }
+              }
             }
-          }
+          },
+          "firstRowOnly": false
         }
       },
       {
@@ -31,7 +54,7 @@
         "type": "ForEach",
         "dependsOn": [
           {
-            "activity": "NB_LIST_SQL_ENTITIES",
+            "activity": "LK_GET_SQL_ENTITIES",
             "dependencyConditions": [
               "Succeeded"
             ]
@@ -39,7 +62,7 @@
         ],
         "typeProperties": {
           "items": {
-            "value": "@json(activity('NB_LIST_SQL_ENTITIES').output.result.exitValue)",
+            "value": "@activity('LK_GET_SQL_ENTITIES').output.value",
             "type": "Expression"
           },
           "activities": [

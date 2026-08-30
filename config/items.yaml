@@ -12,10 +12,6 @@ items:
     type: Notebook
     path: NB_STRATUM_FUNCTIONS.Notebook
 
-  - name: NB_LIST_LANDING_ENTITIES
-    type: Notebook
-    path: NB_LIST_LANDING_ENTITIES.Notebook
-
   - name: NB_LOAD_BRONZE
     type: Notebook
     path: NB_LOAD_BRONZE.Notebook

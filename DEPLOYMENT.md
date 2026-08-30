@@ -22,7 +22,9 @@ sidesteps the bug at the root instead of working around it.)
 3. Creates `Landing` / `Bronze` / `Gold` lakehouses in Data (+ `Silver` if
    `config/environments.yaml` sets `include_silver: true` for that environment)
 4. Creates the `SQL_STRATUM_CATALOG` SQL Database in Integration and applies
-   `config/metadata_schema.sql` (idempotent — safe to re-run)
+   `config/metadata_schema.sql` (idempotent — safe to re-run), then creates a
+   Fabric Connection to that database (`WorkspaceIdentity` credentials, no
+   stored secret) so pipelines can `Lookup` against it directly
 5. Deploys every item in `config/items.yaml` into Code (notebooks, pipelines,
    one Variable Library), patching cross-item ID placeholders (e.g. a
    pipeline's `__NB_LOAD_BRONZE_ID__`) with the real IDs once they're known
@@ -100,7 +102,11 @@ re-import, no second notebook.
 `catalog.Connection` / `catalog.Source` / `catalog.LandingEntity` /
 `catalog.BronzeEntity` are the only rows `PL_INGEST_SQL`, `PL_INGEST_FILE`,
 and `NB_LOAD_BRONZE` need to pick up a new entity — no pipeline or notebook
-changes required for a source of a type the framework already supports:
+changes required for a source of a type the framework already supports.
+(This is a *different* Connection from the one `NB_DEPLOY` creates
+automatically for the metadata catalog itself — that one only lets pipelines
+`Lookup` against `catalog.LandingEntity`; this one is the actual source
+system each `catalog.LandingEntity` row gets copied from.)
 
 1. Register the actual Fabric Connection for your source (SQL Server, ADLS
    Gen2, etc.) in the Integration workspace, and insert its GUID into
