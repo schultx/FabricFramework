@@ -14,7 +14,7 @@
         },
         "typeProperties": {
           "notebookId": "__NB_LIST_LANDING_ENTITIES_ID__",
-          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
           "parameters": {
             "connector_type": {
               "value": {
