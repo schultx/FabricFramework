@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "NB_LIST_LANDING_ENTITIES",
+    "description": "Returns active catalog.LandingEntity rows (joined to their Connection) for a given connector Type as a JSON exit value, so PL_INGEST_SQL/PL_INGEST_FILE can ForEach over them without the pipeline needing its own connection to the metadata catalog."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "9f2e6c8d-4b1a-4d7e-9c5f-3a8e6d1c9b42"
+  }
+}

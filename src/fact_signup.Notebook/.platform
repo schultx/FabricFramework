@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "fact_signup",
+    "description": "Gold fact, sourced directly from Bronze.dbo.customer, using SubscriptionDate as the signup event. Demo pair with dim_customer, built on demodata/customer.csv."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "c9e5a7b4-1d2f-4b8e-9c4a-6f3d9b5e8a91"
+  }
+}

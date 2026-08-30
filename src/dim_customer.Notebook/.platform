@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "dim_customer",
+    "description": "Gold dimension, sourced directly from Bronze.dbo.customer (no Silver needed -- nothing else reuses this shape). Demo pair with fact_signup, built on demodata/customer.csv."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "b8d4f6a3-9c1e-4a7d-b3f8-5e2c8a1d4f70"
+  }
+}

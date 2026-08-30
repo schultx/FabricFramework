@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "VariableLibrary",
+    "displayName": "VAR_STRATUM",
+    "description": "Environment-scoped values (capacity name, silver toggle) for pipelines/notebooks in the Code workspace. One value set per environment, selected via fabric-cicd's Variable Library stage mapping."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "e2a8c4f9-5d3b-4e7a-8c1f-9d4b6a2e8c73"
+  }
+}

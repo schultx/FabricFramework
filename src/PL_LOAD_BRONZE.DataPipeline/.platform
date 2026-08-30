@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_LOAD_BRONZE",
+    "description": "Single TridentNotebook activity running NB_LOAD_BRONZE, which loops over every active catalog.BronzeEntity row itself."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "1a3c5e7f-9b2d-4a6c-8e1f-3d5b7a9c1e63"
+  }
+}

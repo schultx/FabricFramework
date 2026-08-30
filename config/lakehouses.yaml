@@ -1,0 +1,13 @@
+# Lakehouses created in the Data workspace of every environment.
+# `always: false` means the item is only created when that environment's
+# `include_silver` flag (environments.yaml) is true.
+
+lakehouses:
+  - name: Landing
+    always: true
+  - name: Bronze
+    always: true
+  - name: Gold
+    always: true
+  - name: Silver
+    always: false

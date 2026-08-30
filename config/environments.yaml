@@ -1,0 +1,31 @@
+# One entry per environment NB_DEPLOY.ipynb can target. `short` is used in workspace
+# display names: "Stratum Data (D)", "Stratum Data (T)", "Stratum Data (P)".
+#
+# include_silver: only the environments that actually need shared Gold logic should
+# set this true -- it's what makes the Silver lakehouse (and its pipeline/notebook)
+# conditional rather than a permanent fixture. Leave every environment false until a
+# real Bronze entity needs to be reused by 2+ Gold objects.
+
+environments:
+  - name: development
+    short: D
+    capacity: fabfabricmsa
+    include_silver: false
+  - name: test
+    short: T
+    capacity: fabfabricmsa
+    include_silver: false
+  - name: production
+    short: P
+    capacity: fabfabricmsa
+    include_silver: false
+
+# Entra principals granted access to every workspace this deploys. Leave empty to
+# grant access only to the identity running the deployment (matches upstream's own
+# "keep empty [] if you only want to assign this to your personal account" pattern).
+workspace_roles: []
+# Example entry:
+# workspace_roles:
+#   - principal_id: "00000000-0000-0000-0000-000000000000"
+#     principal_type: Group   # Group | User | ServicePrincipal
+#     role: Contributor       # Admin | Member | Contributor | Viewer

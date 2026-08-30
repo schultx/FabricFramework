@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "NB_LOAD_SILVER",
+    "description": "Generic Bronze -> Silver loader for the shared logic reused by 2+ Gold objects. Only deployed when an environment sets include_silver: true. Loops over every active catalog.SilverEntity row in one Spark session (or just silver_entity_name, if set)."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "a4c2d8f1-7e3b-4f9c-8d1a-2e6f9b4c7d51"
+  }
+}

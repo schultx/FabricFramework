@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Triggers a run of NB_DEPLOY_ALL in Fabric via the Job Scheduler REST API and polls
+Triggers a run of NB_DEPLOY in Fabric via the Job Scheduler REST API and polls
 until it completes. This is the ONLY thing azure-pipelines.yml does per environment --
-NB_DEPLOY_ALL itself re-downloads the latest src/ and config/ from this repo and does
+NB_DEPLOY itself re-downloads the latest src/ and config/ from this repo and does
 the actual deployment/update work.
 
 Environment scoping does NOT use the Job Scheduler's `parameters` array -- live testing
@@ -14,10 +14,10 @@ before every run -- proven to work by the same live test.
 
 Required env vars:
     FABRIC_CLIENT_ID, FABRIC_CLIENT_SECRET, FABRIC_TENANT_ID  -- service principal
-    FABRIC_WORKSPACE_ID, FABRIC_NOTEBOOK_ID                   -- where NB_DEPLOY_ALL
+    FABRIC_WORKSPACE_ID, FABRIC_NOTEBOOK_ID                   -- where NB_DEPLOY
                                                                   was imported (one-time
                                                                   manual bootstrap, see
-                                                                  FMD_FRAMEWORK_DEPLOYMENT.md)
+                                                                  DEPLOYMENT.md)
 
 Usage:
     python run_notebook.py --environment development
@@ -125,10 +125,10 @@ def main() -> None:
     notebook_id = os.environ["FABRIC_NOTEBOOK_ID"]
     headers = {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
 
-    print(f"Setting target_environments_csv = '{args.environment or 'ALL'}' on NB_DEPLOY_ALL")
+    print(f"Setting target_environments_csv = '{args.environment or 'ALL'}' on NB_DEPLOY")
     set_environment_parameter(workspace_id, notebook_id, headers, args.environment)
 
-    print(f"Starting NB_DEPLOY_ALL for environment(s): '{args.environment or 'ALL'}'")
+    print(f"Starting NB_DEPLOY for environment(s): '{args.environment or 'ALL'}'")
     resp = requests.post(
         f"{API_BASE}/workspaces/{workspace_id}/items/{notebook_id}/jobs/instances?jobType=RunNotebook",
         headers=headers,
@@ -144,17 +144,17 @@ def main() -> None:
     start = time.time()
     while True:
         if time.time() - start > TIMEOUT_SECONDS:
-            sys.exit("Timed out waiting for NB_DEPLOY_ALL to complete")
+            sys.exit("Timed out waiting for NB_DEPLOY to complete")
         time.sleep(POLL_SECONDS)
         poll = requests.get(status_url, headers=headers)
         poll.raise_for_status()
         status = poll.json().get("status")
         print(f"  status: {status}")
         if status == "Completed":
-            print("NB_DEPLOY_ALL run completed successfully.")
+            print("NB_DEPLOY run completed successfully.")
             return
         if status in ("Failed", "Cancelled", "Deduped"):
-            sys.exit(f"NB_DEPLOY_ALL run ended with status '{status}': {poll.text}")
+            sys.exit(f"NB_DEPLOY run ended with status '{status}': {poll.text}")
 
 
 if __name__ == "__main__":

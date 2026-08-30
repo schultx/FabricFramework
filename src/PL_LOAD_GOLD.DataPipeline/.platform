@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_LOAD_GOLD",
+    "description": "Single TridentNotebook activity running NB_LOAD_GOLD (which orchestrates dim_customer -> fact_signup, or the real dim/fact set as the business domain grows)."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "3c5e7a9b-2d4f-4c8e-1a3b-5f7d9c2e4a85"
+  }
+}

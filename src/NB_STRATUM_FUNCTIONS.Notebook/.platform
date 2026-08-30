@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "NB_STRATUM_FUNCTIONS",
+    "description": "Shared runtime helpers (workspace/lakehouse resolution) and the Gold-layer load_dimension()/load_fact() facade used by NB_LOAD_BRONZE, NB_LOAD_SILVER, and NB_LOAD_GOLD."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "d97d7138-247a-4386-949c-f77903aaa01a"
+  }
+}

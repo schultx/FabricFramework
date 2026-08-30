@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "NB_LOAD_GOLD",
+    "description": "Orchestrates the Gold-layer dim/fact notebooks in dependency order (dimensions before the facts that reference them)."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "d1f7b9c6-3e4a-4d9f-a1c6-7b5e1d9f6a02"
+  }
+}

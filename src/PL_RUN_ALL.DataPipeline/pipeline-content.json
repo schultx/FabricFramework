@@ -1,0 +1,97 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "name": "EP_INGEST_SQL",
+        "type": "ExecutePipeline",
+        "dependsOn": [],
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "__PL_INGEST_SQL_ID__",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {}
+        }
+      },
+      {
+        "name": "EP_INGEST_FILE",
+        "type": "ExecutePipeline",
+        "dependsOn": [],
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "__PL_INGEST_FILE_ID__",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {}
+        }
+      },
+      {
+        "name": "EP_LOAD_BRONZE",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "EP_INGEST_SQL",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          },
+          {
+            "activity": "EP_INGEST_FILE",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "__PL_LOAD_BRONZE_ID__",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "bronze_entity_name": ""
+          }
+        }
+      },
+      {
+        "name": "EP_LOAD_GOLD",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "EP_LOAD_BRONZE",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "__PL_LOAD_GOLD_ID__",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {}
+        }
+      }
+    ],
+    "parameters": {}
+  }
+}

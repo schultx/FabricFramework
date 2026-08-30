@@ -1,0 +1,63 @@
+# Items deployed into the Code workspace of every environment. `path` is the folder
+# under src/ (this repo, downloaded fresh from git on every NB_DEPLOY run).
+# `requires_silver: true` items are only deployed when that environment's
+# `include_silver` flag (environments.yaml) is true.
+
+items:
+  - name: VAR_STRATUM
+    type: VariableLibrary
+    path: VAR_STRATUM.VariableLibrary
+
+  - name: NB_STRATUM_FUNCTIONS
+    type: Notebook
+    path: NB_STRATUM_FUNCTIONS.Notebook
+
+  - name: NB_LIST_LANDING_ENTITIES
+    type: Notebook
+    path: NB_LIST_LANDING_ENTITIES.Notebook
+
+  - name: NB_LOAD_BRONZE
+    type: Notebook
+    path: NB_LOAD_BRONZE.Notebook
+
+  - name: NB_LOAD_SILVER
+    type: Notebook
+    path: NB_LOAD_SILVER.Notebook
+    requires_silver: true
+
+  - name: NB_LOAD_GOLD
+    type: Notebook
+    path: NB_LOAD_GOLD.Notebook
+
+  - name: dim_customer
+    type: Notebook
+    path: dim_customer.Notebook
+
+  - name: fact_signup
+    type: Notebook
+    path: fact_signup.Notebook
+
+  - name: PL_INGEST_SQL
+    type: DataPipeline
+    path: PL_INGEST_SQL.DataPipeline
+
+  - name: PL_INGEST_FILE
+    type: DataPipeline
+    path: PL_INGEST_FILE.DataPipeline
+
+  - name: PL_LOAD_BRONZE
+    type: DataPipeline
+    path: PL_LOAD_BRONZE.DataPipeline
+
+  - name: PL_LOAD_SILVER
+    type: DataPipeline
+    path: PL_LOAD_SILVER.DataPipeline
+    requires_silver: true
+
+  - name: PL_LOAD_GOLD
+    type: DataPipeline
+    path: PL_LOAD_GOLD.DataPipeline
+
+  - name: PL_RUN_ALL
+    type: DataPipeline
+    path: PL_RUN_ALL.DataPipeline

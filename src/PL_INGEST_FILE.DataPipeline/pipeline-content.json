@@ -1,0 +1,135 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "name": "NB_LIST_FILE_ENTITIES",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "__NB_LIST_LANDING_ENTITIES_ID__",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "connector_type": {
+              "value": {
+                "value": "FILE",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "FE_FILE_ENTITY",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "NB_LIST_FILE_ENTITIES",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@json(activity('NB_LIST_FILE_ENTITIES').output.result.exitValue)",
+            "type": "Expression"
+          },
+          "activities": [
+            {
+              "name": "CP_FILE_TO_LANDING",
+              "type": "Copy",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 1,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "BinarySource",
+                  "storeSettings": {
+                    "type": "AzureBlobFSReadSettings",
+                    "recursive": true
+                  },
+                  "datasetSettings": {
+                    "annotations": [],
+                    "type": "Binary",
+                    "typeProperties": {
+                      "location": {
+                        "type": "AzureBlobFSLocation",
+                        "fileSystem": {
+                          "value": "@item().Namespace",
+                          "type": "Expression"
+                        },
+                        "folderPath": {
+                          "value": "@item().SourceSchema",
+                          "type": "Expression"
+                        },
+                        "fileName": {
+                          "value": "@item().SourceObject",
+                          "type": "Expression"
+                        }
+                      }
+                    },
+                    "externalReferences": {
+                      "connection": "@item().ConnectionGuid"
+                    }
+                  }
+                },
+                "sink": {
+                  "type": "BinarySink",
+                  "storeSettings": {
+                    "type": "LakehouseWriteSettings",
+                    "copyBehavior": "PreserveHierarchy"
+                  },
+                  "datasetSettings": {
+                    "annotations": [],
+                    "linkedService": {
+                      "name": "LandingLakehouse",
+                      "properties": {
+                        "annotations": [],
+                        "type": "Lakehouse",
+                        "typeProperties": {
+                          "workspaceId": "__DATA_WORKSPACE_ID__",
+                          "artifactId": "__LANDING_LAKEHOUSE_ID__",
+                          "rootFolder": "Files"
+                        }
+                      }
+                    },
+                    "type": "Binary",
+                    "typeProperties": {
+                      "location": {
+                        "type": "LakehouseLocation",
+                        "fileName": {
+                          "value": "@item().SourceObject",
+                          "type": "Expression"
+                        },
+                        "folderPath": {
+                          "value": "@item().FilePath",
+                          "type": "Expression"
+                        }
+                      }
+                    },
+                    "schema": []
+                  }
+                },
+                "enableStaging": false
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {}
+  }
+}

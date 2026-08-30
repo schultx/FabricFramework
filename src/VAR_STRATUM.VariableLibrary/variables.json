@@ -1,0 +1,23 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/variableLibrary/definition/variables/1.0.0/schema.json",
+  "variables": [
+    {
+      "name": "environment_name",
+      "note": "development | test | production -- used in log/audit rows written by pipelines",
+      "type": "String",
+      "value": "development"
+    },
+    {
+      "name": "capacity_name",
+      "note": "Fabric capacity this environment's workspaces are assigned to",
+      "type": "String",
+      "value": "fabfabricmsa"
+    },
+    {
+      "name": "include_silver",
+      "note": "Whether this environment has a Silver lakehouse/pipeline/notebook deployed",
+      "type": "Boolean",
+      "value": "false"
+    }
+  ]
+}

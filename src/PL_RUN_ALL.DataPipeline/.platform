@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_RUN_ALL",
+    "description": "Sequential end-to-end orchestrator: ingest (SQL + FILE) -> Bronze -> [Silver, only when the environment has it] -> Gold. NB_DEPLOY inserts the Silver stage for environments with include_silver: true; the four-stage form here is what's shipped in git."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "6f8b1d3e-5a7c-4f9e-4d6a-8b1c3e5f7a18"
+  }
+}

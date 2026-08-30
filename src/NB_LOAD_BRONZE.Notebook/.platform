@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "NB_LOAD_BRONZE",
+    "description": "Generic, metadata-driven Landing -> Bronze loader. Loops over every active catalog.BronzeEntity row in one Spark session (or just bronze_entity_name, if set)."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "f3a1c9e2-6b4d-4e8a-9c2f-1d7e5a8b3c60"
+  }
+}

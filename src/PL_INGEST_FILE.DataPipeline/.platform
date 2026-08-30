@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_FILE",
+    "description": "Metadata-driven Source -> Landing copy for FILE-type connections (ADLS Gen2 by default). Looks up every active catalog.LandingEntity row behind a FILE Connection (via NB_LIST_LANDING_ENTITIES), then Copies each file straight into Landing, unmodified."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "5e7a9c2d-4f6b-4e8d-3c5f-7a9b2d4e6c07"
+  }
+}

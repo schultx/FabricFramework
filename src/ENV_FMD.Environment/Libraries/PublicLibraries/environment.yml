@@ -1,3 +1,0 @@
-dependencies:
-  - pip:
-      - faker==40.1.0

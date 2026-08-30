@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_LOAD_SILVER",
+    "description": "Single TridentNotebook activity running NB_LOAD_SILVER. Only deployed when the environment sets include_silver: true."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "2b4d6f8a-1c3e-4b7d-9f2a-4e6c8b1d3f74"
+  }
+}

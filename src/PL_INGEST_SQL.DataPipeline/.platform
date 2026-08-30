@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_SQL",
+    "description": "Metadata-driven Source -> Landing copy for SQL-type connections. Looks up every active catalog.LandingEntity row behind a SQL Connection (via NB_LIST_LANDING_ENTITIES), then Copies each one straight into Landing."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "4d6f8b1c-3e5a-4d9c-2b4e-6f8a1c3e5b96"
+  }
+}

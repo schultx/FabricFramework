@@ -1,13 +1,13 @@
-# Deploys FabricFramework by triggering the single NB_DEPLOY_ALL notebook already
-# imported into Fabric (see FMD_FRAMEWORK_DEPLOYMENT.md for the one-time bootstrap step).
-# NB_DEPLOY_ALL re-downloads src/ and config/ from this repo's `main` branch on every
+# Deploys FabricFramework by triggering the single NB_DEPLOY notebook already
+# imported into Fabric (see DEPLOYMENT.md for the one-time bootstrap step).
+# NB_DEPLOY re-downloads src/ and config/ from this repo's `main` branch on every
 # run and creates/updates every item accordingly -- this pipeline's only job is to
 # start that run, once per environment, in order, with an approval gate before Test
 # and before Production.
 #
 # Required variable group `fabric-framework-secrets`:
 #   FABRIC_CLIENT_ID, FABRIC_CLIENT_SECRET, FABRIC_TENANT_ID   -- service principal
-#   FABRIC_WORKSPACE_ID, FABRIC_NOTEBOOK_ID                    -- where NB_DEPLOY_ALL lives
+#   FABRIC_WORKSPACE_ID, FABRIC_NOTEBOOK_ID                    -- where NB_DEPLOY lives
 #
 # Required ADO Environments (Pipelines -> Environments): fabricframework-dev,
 # fabricframework-test, fabricframework-prod -- add required reviewers on test/prod.
@@ -37,7 +37,7 @@ stages:
                 - script: pip install -r deploy/requirements.txt
                   displayName: Install dependencies
                 - script: python deploy/run_notebook.py --environment development
-                  displayName: Run NB_DEPLOY_ALL (development)
+                  displayName: Run NB_DEPLOY (development)
                   env:
                     FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
                     FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
@@ -59,7 +59,7 @@ stages:
                   inputs: { versionSpec: '3.11' }
                 - script: pip install -r deploy/requirements.txt
                 - script: python deploy/run_notebook.py --environment test
-                  displayName: Run NB_DEPLOY_ALL (test)
+                  displayName: Run NB_DEPLOY (test)
                   env:
                     FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
                     FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
@@ -81,7 +81,7 @@ stages:
                   inputs: { versionSpec: '3.11' }
                 - script: pip install -r deploy/requirements.txt
                 - script: python deploy/run_notebook.py --environment production
-                  displayName: Run NB_DEPLOY_ALL (production)
+                  displayName: Run NB_DEPLOY (production)
                   env:
                     FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
                     FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
