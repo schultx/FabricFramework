@@ -3,8 +3,17 @@
 #
 # include_silver: only the environments that actually need shared Gold logic should
 # set this true -- it's what makes the Silver lakehouse (and its pipeline/notebook)
-# conditional rather than a permanent fixture. Leave every environment false until a
-# real Bronze entity needs to be reused by 2+ Gold objects.
+# conditional rather than a permanent fixture. Leave false until a real Bronze entity
+# needs to be reused by 2+ Gold objects -- for a fresh clone of this repo, that means
+# false, not the true set below.
+#
+# Set to true here (deliberately, not left over from testing) to keep the Silver
+# path live end-to-end as a working, verified example: silver.customer is a demo
+# 1:1 reshape of the Bronze customer entity (see NB_DEPLOY's seed step), proven in
+# all three environments -- Gold still reads Bronze directly, since nothing in this
+# demo actually needs Silver's reuse. Flip back to false (and drop the Silver
+# lakehouse/NB_LOAD_SILVER/PL_LOAD_SILVER from a target environment by hand) once
+# this framework has a real multi-Gold-consumer use case, or none at all.
 
 environments:
   - name: development
