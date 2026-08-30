@@ -45,9 +45,7 @@ silver_entity_name = ""   # optional catalog.SilverEntity.Name filter -- empty =
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-# META {
+# META   "language_group": "synapse_pyspark",
 # META   "tags": [
 # META     "parameters"
 # META   ]
