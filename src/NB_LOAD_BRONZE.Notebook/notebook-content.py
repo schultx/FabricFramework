@@ -6,7 +6,18 @@
 # META   "kernel_info": {
 # META     "name": "synapse_pyspark"
 # META   },
-# META   "dependencies": {}
+# META   "dependencies": {
+# META     "lakehouse": {
+# META       "default_lakehouse": "__BRONZE_LAKEHOUSE_ID__",
+# META       "default_lakehouse_name": "Bronze",
+# META       "default_lakehouse_workspace_id": "__DATA_WORKSPACE_ID__",
+# META       "known_lakehouses": [
+# META         {
+# META           "id": "__BRONZE_LAKEHOUSE_ID__"
+# META         }
+# META       ]
+# META     }
+# META   }
 # META }
 
 # MARKDOWN ********************
