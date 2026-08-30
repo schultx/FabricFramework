@@ -10,15 +10,15 @@ environments:
   - name: development
     short: D
     capacity: fabfabricmsa
-    include_silver: false
+    include_silver: true
   - name: test
     short: T
     capacity: fabfabricmsa
-    include_silver: false
+    include_silver: true
   - name: production
     short: P
     capacity: fabfabricmsa
-    include_silver: false
+    include_silver: true
 
 # Entra principals granted access to every workspace this deploys. Leave empty to
 # grant access only to the identity running the deployment (matches upstream's own
