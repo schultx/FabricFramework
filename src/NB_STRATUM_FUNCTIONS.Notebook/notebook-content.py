@@ -97,9 +97,8 @@ def integration_workspace_name() -> str:
 
 def onelake_path(workspace_id: str, lakehouse_id: str, section: Literal["Files", "Tables"] = "Files", subpath: str = "") -> str:
     """Build an abfss:// path into another lakehouse's Files or Tables section."""
-    endpoint = notebookutils.conf.get("trident.onelake.endpoint")
     subpath = subpath.strip("/")
-    base = f"abfss://{workspace_id}@{endpoint}/{lakehouse_id}/{section}"
+    base = f"abfss://{workspace_id}@onelake.dfs.fabric.microsoft.com/{lakehouse_id}/{section}"
     return f"{base}/{subpath}" if subpath else base
 
 # METADATA ********************
