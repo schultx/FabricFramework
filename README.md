@@ -1,4 +1,4 @@
-# Stratum
+# Keystone
 
 A lean, metadata-driven Fabric framework for Data Platform + AI teams. Three
 workspaces per environment, three lakehouses (four if you need it), one
@@ -16,9 +16,9 @@ repo specifically.
 
 | Workspace | Holds |
 |---|---|
-| `Stratum Data (D/T/P)` | Lakehouses only: `Landing`, `Bronze`, `Gold`, and `Silver` **only if** that environment sets `include_silver: true` |
-| `Stratum Integration (D/T/P)` | The metadata catalog SQL Database + any registered source Connections |
-| `Stratum Code (D/T/P)` | Everything executable: ingestion pipelines, loader notebooks, the Gold function library, one Variable Library |
+| `Keystone Data (D/T/P)` | Lakehouses only: `Landing`, `Bronze`, `Gold`, and `Silver` **only if** that environment sets `include_silver: true` |
+| `Keystone Integration (D/T/P)` | The metadata catalog SQL Database + any registered source Connections |
+| `Keystone Code (D/T/P)` | Everything executable: ingestion pipelines, loader notebooks, the Gold function library, one Variable Library |
 
 **Layers**, deliberately not one-size-fits-all:
 

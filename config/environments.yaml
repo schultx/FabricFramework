@@ -1,5 +1,5 @@
 # One entry per environment NB_DEPLOY.ipynb can target. `short` is used in workspace
-# display names: "Stratum Data (D)", "Stratum Data (T)", "Stratum Data (P)".
+# display names: "Keystone Data (D)", "Keystone Data (T)", "Keystone Data (P)".
 #
 # include_silver: only the environments that actually need shared Gold logic should
 # set this true -- it's what makes the Silver lakehouse (and its pipeline/notebook)

@@ -23,7 +23,7 @@
 # MARKDOWN ********************
 
 # # dim_customer (demo)
-# Gold dimension built with `load_dimension()` from `NB_STRATUM_FUNCTIONS`,
+# Gold dimension built with `load_dimension()` from `NB_KEYSTONE_FUNCTIONS`,
 # sourced **directly from Bronze** -- this shape isn't reused anywhere else, so
 # there's no Silver entity for it.
 #
@@ -37,7 +37,7 @@
 
 # CELL ********************
 
-%run NB_STRATUM_FUNCTIONS
+%run NB_KEYSTONE_FUNCTIONS
 
 # METADATA ********************
 

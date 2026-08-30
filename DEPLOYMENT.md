@@ -17,8 +17,8 @@ sidesteps the bug at the root instead of working around it.)
 ## What it does, per environment
 
 1. Resolves the target Fabric capacity
-2. Creates/updates the three workspaces: `Stratum Data (X)`,
-   `Stratum Integration (X)`, `Stratum Code (X)`
+2. Creates/updates the three workspaces: `Keystone Data (X)`,
+   `Keystone Integration (X)`, `Keystone Code (X)`
 3. Creates `Landing` / `Bronze` / `Gold` lakehouses in Data (+ `Silver` if
    `config/environments.yaml` sets `include_silver: true` for that environment)
 4. Creates the `SQL_STRATUM_CATALOG` SQL Database in Integration and applies
@@ -39,7 +39,7 @@ overwrite-content-if-exists).
 The very first run has to happen by hand, because Azure DevOps needs
 something already inside Fabric to call:
 
-1. Create a workspace (e.g. `Stratum Deploy`) — any workspace, Contributor
+1. Create a workspace (e.g. `Keystone Deploy`) — any workspace, Contributor
    role is enough for you personally at this point.
 2. Download `setup/NB_DEPLOY.ipynb` from this repo and import it into that
    workspace (Fabric UI → **Import notebook**).

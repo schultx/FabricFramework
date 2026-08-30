@@ -31,7 +31,7 @@ Pick one:
   `az account get-access-token --resource https://api.fabric.microsoft.com`
   without ever seeing a password or long-lived secret.
 - **Alternative — service principal.** Create one
-  (`az ad sp create-for-rbac --name stratum-test`) with Contributor on the
+  (`az ad sp create-for-rbac --name keystone-test`) with Contributor on the
   capacity, and share the client id / tenant id / client secret with me. I'd
   only hold it in this session's environment variables for the calls — never
   write it into the repo or any file.

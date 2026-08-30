@@ -4,13 +4,13 @@
 # `include_silver` flag (environments.yaml) is true.
 
 items:
-  - name: VAR_STRATUM
+  - name: VAR_KEYSTONE
     type: VariableLibrary
-    path: VAR_STRATUM.VariableLibrary
+    path: VAR_KEYSTONE.VariableLibrary
 
-  - name: NB_STRATUM_FUNCTIONS
+  - name: NB_KEYSTONE_FUNCTIONS
     type: Notebook
-    path: NB_STRATUM_FUNCTIONS.Notebook
+    path: NB_KEYSTONE_FUNCTIONS.Notebook
 
   - name: NB_LIST_LANDING_ENTITIES
     type: Notebook

@@ -35,7 +35,7 @@
 
 # CELL ********************
 
-%run NB_STRATUM_FUNCTIONS
+%run NB_KEYSTONE_FUNCTIONS
 
 # METADATA ********************
 
