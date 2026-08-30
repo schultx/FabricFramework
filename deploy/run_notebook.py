@@ -12,6 +12,16 @@ default. Instead, this script bakes the target environment into the notebook's
 "parameters"-tagged cell via getDefinition -> decode -> modify -> encode -> updateDefinition
 before every run -- proven to work by the same live test.
 
+Retries the whole trigger-and-poll cycle up to MAX_DEPLOY_ATTEMPTS times on a
+"Failed" job status. Live testing found that a from-scratch (or partially-provisioned,
+e.g. a brand new test/production environment) deploy can hit a transient Fabric-side
+"System cancelled the Spark session due to statement execution failures" partway
+through creating a large batch of new items, even though every step NB_DEPLOY takes is
+idempotent -- a retry simply picks up wherever the last attempt left off (already-created
+items are detected and skipped/updated, not recreated). A real, non-transient bug in the
+notebook's own logic will fail identically on every attempt and still surface after the
+retries are exhausted.
+
 Required env vars:
     FABRIC_CLIENT_ID, FABRIC_CLIENT_SECRET, FABRIC_TENANT_ID  -- service principal
     FABRIC_WORKSPACE_ID, FABRIC_NOTEBOOK_ID                   -- where NB_DEPLOY
@@ -43,6 +53,7 @@ LRO_POLL_SECONDS = 5
 TIMEOUT_SECONDS = 60 * 60  # first-ever run provisions whole workspaces; give it room
 PARAM_CELL_TAG = "parameters"
 PARAM_NAME = "target_environments_csv"
+MAX_DEPLOY_ATTEMPTS = 5
 
 
 def get_token() -> str:
@@ -113,22 +124,8 @@ def set_environment_parameter(workspace_id: str, notebook_id: str, headers: dict
     poll_lro(update_resp.headers["Location"], headers, LRO_POLL_SECONDS)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--environment", default="",
-        help="development | test | production (omit to deploy all three in one run)",
-    )
-    args = parser.parse_args()
-
-    workspace_id = os.environ["FABRIC_WORKSPACE_ID"]
-    notebook_id = os.environ["FABRIC_NOTEBOOK_ID"]
-    headers = {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
-
-    print(f"Setting target_environments_csv = '{args.environment or 'ALL'}' on NB_DEPLOY")
-    set_environment_parameter(workspace_id, notebook_id, headers, args.environment)
-
-    print(f"Starting NB_DEPLOY for environment(s): '{args.environment or 'ALL'}'")
+def run_deploy_job(workspace_id: str, notebook_id: str, headers: dict) -> tuple:
+    """Trigger one NB_DEPLOY job run and poll it to a terminal status. Returns (status, last_body)."""
     resp = requests.post(
         f"{API_BASE}/workspaces/{workspace_id}/items/{notebook_id}/jobs/instances?jobType=RunNotebook",
         headers=headers,
@@ -144,17 +141,49 @@ def main() -> None:
     start = time.time()
     while True:
         if time.time() - start > TIMEOUT_SECONDS:
-            sys.exit("Timed out waiting for NB_DEPLOY to complete")
+            return "TimedOut", None
         time.sleep(POLL_SECONDS)
         poll = requests.get(status_url, headers=headers)
         poll.raise_for_status()
-        status = poll.json().get("status")
+        body = poll.json()
+        status = body.get("status")
         print(f"  status: {status}")
+        if status in ("Completed", "Failed", "Cancelled", "Deduped"):
+            return status, body
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--environment", default="",
+        help="development | test | production (omit to deploy all three in one run)",
+    )
+    args = parser.parse_args()
+
+    workspace_id = os.environ["FABRIC_WORKSPACE_ID"]
+    notebook_id = os.environ["FABRIC_NOTEBOOK_ID"]
+    headers = {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
+
+    print(f"Setting target_environments_csv = '{args.environment or 'ALL'}' on NB_DEPLOY")
+    set_environment_parameter(workspace_id, notebook_id, headers, args.environment)
+
+    for attempt in range(1, MAX_DEPLOY_ATTEMPTS + 1):
+        print(f"Starting NB_DEPLOY for environment(s): '{args.environment or 'ALL'}' (attempt {attempt}/{MAX_DEPLOY_ATTEMPTS})")
+        headers = {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
+        status, body = run_deploy_job(workspace_id, notebook_id, headers)
+
         if status == "Completed":
             print("NB_DEPLOY run completed successfully.")
             return
-        if status in ("Failed", "Cancelled", "Deduped"):
-            sys.exit(f"NB_DEPLOY run ended with status '{status}': {poll.text}")
+
+        if attempt < MAX_DEPLOY_ATTEMPTS:
+            print(
+                f"NB_DEPLOY run ended with status '{status}' -- retrying. Every step NB_DEPLOY "
+                f"takes is idempotent (create-if-missing / overwrite-content-if-exists), so a retry "
+                f"picks up wherever this attempt left off rather than starting over."
+            )
+        else:
+            sys.exit(f"NB_DEPLOY did not complete after {MAX_DEPLOY_ATTEMPTS} attempts. Last status '{status}': {body}")
 
 
 if __name__ == "__main__":
