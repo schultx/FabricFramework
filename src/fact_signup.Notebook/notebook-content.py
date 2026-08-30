@@ -32,7 +32,9 @@
 # must already exist.
 #
 # ## Data flow
-# 1. Read `Bronze.dbo.customer`
+# 1. Read `dbo.customer` -- unqualified by lakehouse name since Bronze is
+#    this notebook's own default lakehouse; only *sibling* lakehouses need
+#    the 3-part `lakehouse.schema.table` form
 # 2. Build `temp_fact_signup` with a `customer_key` business key and the
 #    signup date as the fact's only measure-adjacent attribute
 # 3. Load to `gold.fact_signup` via `load_fact()` (full overwrite, auto FK mapping on)
@@ -75,7 +77,7 @@ recreate_table = False
 # MAGIC     -- Degenerate dimension / event grain
 # MAGIC     CAST(SubscriptionDate AS DATE) AS SignupDate,
 # MAGIC     Country
-# MAGIC FROM Bronze.dbo.customer
+# MAGIC FROM dbo.customer
 
 # METADATA ********************
 

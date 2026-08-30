@@ -28,8 +28,10 @@
 # there's no Silver entity for it.
 #
 # ## Data flow
-# 1. Read `Bronze.dbo.customer` (loaded by `NB_LOAD_BRONZE` from
-#    `demodata/customer.csv` via the `PL_INGEST_FILE` pipeline)
+# 1. Read `dbo.customer` (loaded by `NB_LOAD_BRONZE` from
+#    `demodata/customer.csv` via the `PL_INGEST_FILE` pipeline) -- unqualified
+#    by lakehouse name since Bronze is this notebook's own default lakehouse;
+#    only *sibling* lakehouses need the 3-part `lakehouse.schema.table` form
 # 2. Build `temp_dim_customer` with a `customer_key` business key
 # 3. Load to `gold.dim_customer` via `load_dimension()` (SCD1)
 
@@ -78,7 +80,7 @@ valid_from_column = None
 # MAGIC     Email,
 # MAGIC     Website,
 # MAGIC     SubscriptionDate
-# MAGIC FROM Bronze.dbo.customer
+# MAGIC FROM dbo.customer
 
 # METADATA ********************
 

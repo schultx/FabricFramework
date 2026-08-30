@@ -90,7 +90,9 @@ print(f"Loading {len(entities)} active Silver entity(ies)")
 # CELL ********************
 
 for entity in entities:
-    bronze_source = f"Bronze.{entity['BronzeSchema']}.{entity['BronzeName']}"
+    # Unqualified by lakehouse name -- Bronze is this notebook's own default lakehouse;
+    # only a *sibling* lakehouse (e.g. Gold) would need the 3-part form.
+    bronze_source = f"{entity['BronzeSchema']}.{entity['BronzeName']}"
     print(f"-- Loading Silver entity '{entity['SilverName']}' from {bronze_source}")
 
     silver_df = spark.table(bronze_source).withColumn("silver_loaded_datetime", F.current_timestamp())
