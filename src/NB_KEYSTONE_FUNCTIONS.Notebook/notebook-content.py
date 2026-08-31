@@ -115,6 +115,7 @@ def onelake_path(workspace_id: str, lakehouse_id: str, section: Literal["Files",
 # ============================================================
 
 import struct
+import uuid
 import pyodbc
 
 
@@ -174,6 +175,36 @@ def catalog_execute(sql: str, params: tuple = ()) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def start_notebook_run(notebook_name: str) -> str:
+    """
+    Insert an audit.NotebookRun row for this run, status 'Running'. Returns a
+    RunGuid -- pass it to end_notebook_run() when the notebook finishes (or
+    fails) to close the row out. Call once, near the top of the notebook,
+    before any real work starts.
+    """
+    run_guid = str(uuid.uuid4())
+    catalog_execute(
+        """
+        INSERT INTO [audit].[NotebookRun] ([NotebookName], [RunGuid], [Status], [StartTimeUtc])
+        VALUES (?, ?, 'Running', SYSUTCDATETIME())
+        """,
+        (notebook_name, run_guid)
+    )
+    return run_guid
+
+
+def end_notebook_run(run_guid: str, status: str, error_message: str = None) -> None:
+    """Close out the audit.NotebookRun row opened by start_notebook_run()."""
+    catalog_execute(
+        """
+        UPDATE [audit].[NotebookRun]
+        SET [Status] = ?, [EndTimeUtc] = SYSUTCDATETIME(), [ErrorMessage] = ?
+        WHERE [RunGuid] = ?
+        """,
+        (status, error_message, run_guid)
+    )
 
 # METADATA ********************
 

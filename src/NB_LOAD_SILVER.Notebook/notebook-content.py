@@ -33,10 +33,49 @@
 #
 # Currently wired to the demo table: `sil_customer`. Add each new Silver
 # notebook here as the business domain grows.
+#
+# One `audit.NotebookRun` row per run, opened here and closed 'Succeeded' at
+# the bottom -- same limitation as `NB_LOAD_GOLD`: a `%run` failure aborts the
+# notebook before the closing cell runs, so a failed run leaves its row stuck
+# at 'Running' rather than closed out 'Failed', though the job itself still
+# reports failed to Fabric either way.
+
+# CELL ********************
+
+%run NB_KEYSTONE_FUNCTIONS
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+run_guid = start_notebook_run("NB_LOAD_SILVER")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
 # CELL ********************
 
 %run sil_customer
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+end_notebook_run(run_guid, "Succeeded")
 
 # METADATA ********************
 

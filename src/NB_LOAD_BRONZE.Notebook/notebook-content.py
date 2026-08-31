@@ -48,6 +48,14 @@
 # dedupe on `PrimaryKeys`, drop rows missing a primary key, and any additional
 # rule in `CleansingRules` (JSON array of `{"type": "not_null", "column": "..."}`
 # / `{"type": "dedupe_keep_latest", "orderBy": "..."}`).
+#
+# One `audit.NotebookRun` row per run (`start_notebook_run`/`end_notebook_run`,
+# `NB_KEYSTONE_FUNCTIONS`). A bad table doesn't abort the whole run -- each
+# entity's load is wrapped in its own try/except, so one malformed source
+# doesn't block every other active table; failures are collected and the run
+# still ends 'Failed' overall (after everything else has had its turn), so
+# the pipeline activity -- and this framework's native failure notifications
+# -- still see it.
 
 # CELL ********************
 
@@ -211,83 +219,105 @@ def _reconcile_deletes(entity: dict, primary_keys: list, target_table: str) -> N
 data_ws_id = resolve_workspace_id(data_workspace_name())
 landing_id = resolve_lakehouse_id(data_ws_id, "Landing")
 
+# One audit.NotebookRun row for this whole run. Per-entity failures below are
+# caught and recorded, but still end this run 'Failed' overall (after every
+# other table's had its chance to load) -- a silent partial success would
+# never surface to the pipeline activity, and from there to the native
+# failure notifications this framework now relies on for alerting.
+run_guid = start_notebook_run("NB_LOAD_BRONZE")
+failed_entities = []
+
 for entity in entities:
-    primary_keys = [k.strip() for k in entity["PrimaryKeys"].split(",") if k.strip()]
-    cleansing_rules = json.loads(entity["CleansingRules"]) if entity["CleansingRules"] else []
-    load_type = entity["LoadType"]
-    delete_handling = entity["DeleteHandling"]
+    # A bad table (malformed file, schema mismatch, whatever) shouldn't take
+    # every other active table down with it -- catch, record, move on.
+    try:
+        primary_keys = [k.strip() for k in entity["PrimaryKeys"].split(",") if k.strip()]
+        cleansing_rules = json.loads(entity["CleansingRules"]) if entity["CleansingRules"] else []
+        load_type = entity["LoadType"]
+        delete_handling = entity["DeleteHandling"]
 
-    print(f"-- Loading Bronze table '{entity['BronzeName']}' from Landing/{entity['FilePath']} "
-          f"({entity['FileType']}, LoadType={load_type})")
+        print(f"-- Loading Bronze table '{entity['BronzeName']}' from Landing/{entity['FilePath']} "
+              f"({entity['FileType']}, LoadType={load_type})")
 
-    source_path = onelake_path(data_ws_id, landing_id, "Files", entity["FilePath"])
-    reader = spark.read
-    if entity["FileType"].lower() == "csv":
-        reader = reader.option("header", "true").option("inferSchema", "true")
-    raw_df = reader.format(entity["FileType"].lower()).load(source_path)
+        source_path = onelake_path(data_ws_id, landing_id, "Files", entity["FilePath"])
+        reader = spark.read
+        if entity["FileType"].lower() == "csv":
+            reader = reader.option("header", "true").option("inferSchema", "true")
+        raw_df = reader.format(entity["FileType"].lower()).load(source_path)
 
-    # ---- generic cleansing: drop rows missing a primary key, dedupe on it,
-    # then apply whatever extra rules the metadata specifies. IsDeletedColumn
-    # (DeleteHandling='SoftDelete') needs no special handling here -- it just
-    # rides along as an ordinary column already present in raw_df. ----
-    clean_df = raw_df.dropna(subset=primary_keys)
-    clean_df = clean_df.dropDuplicates(primary_keys)
+        # ---- generic cleansing: drop rows missing a primary key, dedupe on it,
+        # then apply whatever extra rules the metadata specifies. IsDeletedColumn
+        # (DeleteHandling='SoftDelete') needs no special handling here -- it just
+        # rides along as an ordinary column already present in raw_df. ----
+        clean_df = raw_df.dropna(subset=primary_keys)
+        clean_df = clean_df.dropDuplicates(primary_keys)
 
-    for rule in cleansing_rules:
-        rule_type = rule.get("type")
-        if rule_type == "not_null":
-            clean_df = clean_df.dropna(subset=[rule["column"]])
-        elif rule_type == "dedupe_keep_latest":
-            order_col = rule["orderBy"]
-            clean_df = (
-                clean_df.withColumn("_rn", F.row_number().over(
-                    Window.partitionBy(*primary_keys).orderBy(F.col(order_col).desc())
-                ))
-                .filter("_rn = 1")
-                .drop("_rn")
-            )
-        else:
-            print(f"Warning: unknown cleansing rule type '{rule_type}', skipping")
+        for rule in cleansing_rules:
+            rule_type = rule.get("type")
+            if rule_type == "not_null":
+                clean_df = clean_df.dropna(subset=[rule["column"]])
+            elif rule_type == "dedupe_keep_latest":
+                order_col = rule["orderBy"]
+                clean_df = (
+                    clean_df.withColumn("_rn", F.row_number().over(
+                        Window.partitionBy(*primary_keys).orderBy(F.col(order_col).desc())
+                    ))
+                    .filter("_rn = 1")
+                    .drop("_rn")
+                )
+            else:
+                print(f"Warning: unknown cleansing rule type '{rule_type}', skipping")
 
-    clean_df = clean_df.withColumn("bronze_loaded_datetime", F.current_timestamp())
+        clean_df = clean_df.withColumn("bronze_loaded_datetime", F.current_timestamp())
 
-    _ensure_schema("Bronze", entity["BronzeSchema"])
-    target_table = f"Bronze.{entity['BronzeSchema']}.{entity['BronzeName']}"
-    table_exists = spark.catalog.tableExists(target_table)
+        _ensure_schema("Bronze", entity["BronzeSchema"])
+        target_table = f"Bronze.{entity['BronzeSchema']}.{entity['BronzeName']}"
+        table_exists = spark.catalog.tableExists(target_table)
 
-    if load_type == "Full":
-        # Bronze exactly mirrors the latest full extract every run, so source
-        # deletes are handled for free -- Reconcile would be redundant
-        # busywork here, not a bug to "fix", so it's silently skipped even if
-        # DeleteHandling='Reconcile' is misconfigured on a Full table.
-        clean_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(target_table)
-        print(f"   wrote {clean_df.count()} rows to {target_table} (full overwrite)")
-
-    elif load_type == "Delta":
-        if not table_exists:
+        if load_type == "Full":
+            # Bronze exactly mirrors the latest full extract every run, so source
+            # deletes are handled for free -- Reconcile would be redundant
+            # busywork here, not a bug to "fix", so it's silently skipped even if
+            # DeleteHandling='Reconcile' is misconfigured on a Full table.
             clean_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(target_table)
-            print(f"   wrote {clean_df.count()} rows to {target_table} (first load)")
+            print(f"   wrote {clean_df.count()} rows to {target_table} (full overwrite)")
+
+        elif load_type == "Delta":
+            if not table_exists:
+                clean_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(target_table)
+                print(f"   wrote {clean_df.count()} rows to {target_table} (first load)")
+            else:
+                delta_table = DeltaTable.forName(spark, target_table)
+                merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in primary_keys)
+                update_dict = {col: f"source.{col}" for col in clean_df.columns}
+                delta_table.alias("target").merge(clean_df.alias("source"), merge_conditions) \
+                    .whenMatchedUpdate(set=update_dict) \
+                    .whenNotMatchedInsertAll() \
+                    .execute()
+                print(f"   merged {clean_df.count()} rows into {target_table}")
+
+            if entity["IncrementalColumn"] and entity["IncrementalColumn"] in clean_df.columns:
+                max_value = clean_df.agg(F.max(entity["IncrementalColumn"])).collect()[0][0]
+                if max_value is not None:
+                    _update_watermark(entity["TableId"], str(max_value))
+                    print(f"   watermark advanced to {max_value}")
+
+            if delete_handling == "Reconcile":
+                _reconcile_deletes(entity, primary_keys, target_table)
+
         else:
-            delta_table = DeltaTable.forName(spark, target_table)
-            merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in primary_keys)
-            update_dict = {col: f"source.{col}" for col in clean_df.columns}
-            delta_table.alias("target").merge(clean_df.alias("source"), merge_conditions) \
-                .whenMatchedUpdate(set=update_dict) \
-                .whenNotMatchedInsertAll() \
-                .execute()
-            print(f"   merged {clean_df.count()} rows into {target_table}")
+            raise ValueError(f"Invalid LoadType '{load_type}' for table '{entity['BronzeName']}'. Must be 'Full' or 'Delta'.")
 
-        if entity["IncrementalColumn"] and entity["IncrementalColumn"] in clean_df.columns:
-            max_value = clean_df.agg(F.max(entity["IncrementalColumn"])).collect()[0][0]
-            if max_value is not None:
-                _update_watermark(entity["TableId"], str(max_value))
-                print(f"   watermark advanced to {max_value}")
+    except Exception as exc:
+        print(f"   ERROR loading '{entity['BronzeName']}': {exc!r} -- continuing with remaining tables")
+        failed_entities.append(entity["BronzeName"])
 
-        if delete_handling == "Reconcile":
-            _reconcile_deletes(entity, primary_keys, target_table)
-
-    else:
-        raise ValueError(f"Invalid LoadType '{load_type}' for table '{entity['BronzeName']}'. Must be 'Full' or 'Delta'.")
+if failed_entities:
+    error_message = f"{len(failed_entities)} of {len(entities)} table(s) failed: {failed_entities}"
+    end_notebook_run(run_guid, "Failed", error_message)
+    raise RuntimeError(f"NB_LOAD_BRONZE: {error_message}")
+else:
+    end_notebook_run(run_guid, "Succeeded")
 
 # METADATA ********************
 

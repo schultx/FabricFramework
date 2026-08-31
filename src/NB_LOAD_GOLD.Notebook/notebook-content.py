@@ -31,6 +31,36 @@
 # new dimension notebook above its dependent fact notebook as the business
 # domain grows -- Gold is deliberately NOT metadata-loop-driven: every object
 # gets its own hand-written notebook, %run-chained here.
+#
+# One `audit.NotebookRun` row per run, opened here and closed 'Succeeded' at
+# the bottom. Limitation worth knowing: `%run` failures abort the notebook
+# outright (Fabric surfaces that as a failed job either way), so a failed run
+# leaves its row stuck at 'Running' rather than closed out 'Failed' -- there's
+# no multi-cell try/finally across `%run` magics. Still a real, if incomplete,
+# signal: a 'Running' row well past this pipeline's usual duration means
+# something broke.
+
+# CELL ********************
+
+%run NB_KEYSTONE_FUNCTIONS
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+run_guid = start_notebook_run("NB_LOAD_GOLD")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
 # CELL ********************
 
@@ -46,6 +76,17 @@
 # CELL ********************
 
 %run fact_signup
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+end_notebook_run(run_guid, "Succeeded")
 
 # METADATA ********************
 
