@@ -29,12 +29,23 @@ environments:
     capacity: fabfabricmsa
     include_silver: true
 
-# Entra principals granted access to every workspace this deploys. Leave empty to
-# grant access only to the identity running the deployment (matches upstream's own
-# "keep empty [] if you only want to assign this to your personal account" pattern).
-workspace_roles: []
-# Example entry:
+# Entra principals granted access to each workspace TIER (data / ingestion / code).
+# Split per tier, not one flat list applied everywhere -- Ingestion holds source
+# Connections and the raw metadata catalog, so it deliberately doesn't have to grant
+# whatever a report-building principal needs in Code. Leave a tier's list empty to
+# grant access only to the identity running the deployment for that tier (matches
+# upstream's own "keep empty [] if you only want to assign this to your personal
+# account" pattern).
+workspace_roles:
+  data: []
+  ingestion: []
+  code: []
+# Example: a group that browses Gold-facing items in Code, but has no access to
+# Ingestion's source Connections or the metadata catalog at all:
 # workspace_roles:
-#   - principal_id: "00000000-0000-0000-0000-000000000000"
-#     principal_type: Group   # Group | User | ServicePrincipal
-#     role: Contributor       # Admin | Member | Contributor | Viewer
+#   data: []
+#   ingestion: []
+#   code:
+#     - principal_id: "00000000-0000-0000-0000-000000000000"
+#       principal_type: Group   # Group | User | ServicePrincipal
+#       role: Viewer            # Admin | Member | Contributor | Viewer

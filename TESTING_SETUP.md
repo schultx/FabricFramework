@@ -43,7 +43,7 @@ Pick one:
 | Setting | Default | What I need from you |
 |---|---|---|
 | `capacity` (per environment) | `fabfabricmsa` | Your actual capacity name — can point all three environments at the same trial capacity for a first test |
-| `workspace_roles` | `[]` (only the deploying principal gets access) | Entra object IDs to grant access to, or leave empty for a first test |
+| `workspace_roles` | `{data: [], ingestion: [], code: []}` (only the deploying principal gets access) | Entra object IDs to grant access to, per workspace tier, or leave empty for a first test |
 | `include_silver` | `false` for all three | Leave false unless you already have a Bronze entity that two or more Gold objects need to share |
 
 If you'd rather not decide all of this up front: say "use the defaults for a

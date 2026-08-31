@@ -7,7 +7,7 @@
         "dependsOn": [],
         "policy": {
           "timeout": "0.01:00:00",
-          "retry": 0,
+          "retry": 2,
           "retryIntervalInSeconds": 30,
           "secureInput": false,
           "secureOutput": false
@@ -49,7 +49,7 @@
               "dependsOn": [],
               "policy": {
                 "timeout": "0.01:00:00",
-                "retry": 1,
+                "retry": 2,
                 "retryIntervalInSeconds": 30,
                 "secureInput": false,
                 "secureOutput": false
