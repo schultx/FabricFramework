@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_ONELAKETABLE",
+    "description": "Metadata-driven Source -> Landing copy for OneLakeTable-type connections (a Delta table in another Fabric workspace/lakehouse, addressed directly by workspace + item GUID -- no Fabric Connection object involved). A native Lookup activity queries ingestion.vw_ActiveIngestTables directly (no notebook in the loop) for every active Table row behind a OneLakeTable Connection, then Copies each one straight into Landing as parquet, same as every other connector type."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "ed56e944-07c9-470d-b541-4e36064530f8"
+  }
+}

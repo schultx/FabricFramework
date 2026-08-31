@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_SQLMI",
+    "description": "Metadata-driven Source -> Landing copy for SqlMI-type connections (Azure SQL Managed Instance). A native Lookup activity queries ingestion.vw_ActiveIngestTables directly (no notebook in the loop) for every active Table row behind a SqlMI Connection, already resolved to its ready-to-run SourceQuery, then Copies each one straight into Landing."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "65dcaba1-d00c-430e-9995-1d30e0708f4b"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_ONELAKEFILE",
+    "description": "Metadata-driven Source -> Landing copy for OneLakeFile-type connections (a file in another Fabric workspace/lakehouse's Files section, addressed directly by workspace + item GUID -- no Fabric Connection object involved). A native Lookup activity queries ingestion.vw_ActiveIngestTables directly (no notebook in the loop) for every active Table row behind a OneLakeFile Connection, then Copies each file straight into Landing, unmodified."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "69a69241-739a-4806-abf8-86e5145b5f74"
+  }
+}

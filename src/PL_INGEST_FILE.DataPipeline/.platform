@@ -3,7 +3,7 @@
   "metadata": {
     "type": "DataPipeline",
     "displayName": "PL_INGEST_FILE",
-    "description": "Metadata-driven Source -> Landing copy for File-type connections (ADLS Gen2 by default). Looks up every active ingestion.Table row behind a File Connection (via NB_LIST_ACTIVE_TABLES), then Copies each file straight into Landing, unmodified."
+    "description": "Metadata-driven Source -> Landing copy for File-type connections (ADLS Gen2 by default). A native Lookup activity queries ingestion.vw_ActiveIngestTables directly (no notebook in the loop) for every active Table row behind a File Connection, then Copies each file straight into Landing, unmodified."
   },
   "config": {
     "version": "2.0",

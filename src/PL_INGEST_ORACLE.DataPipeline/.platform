@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_ORACLE",
+    "description": "Metadata-driven Source -> Landing copy for Oracle-type connections (via an on-premises Data Gateway). A native Lookup activity queries ingestion.vw_ActiveIngestTables directly (no notebook in the loop) for every active Table row behind an Oracle Connection, already resolved to its ready-to-run SourceQuery, then Copies each one straight into Landing."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "6483dc26-1b65-44ae-bf93-b24062ce32ba"
+  }
+}

@@ -2,7 +2,7 @@
   "properties": {
     "activities": [
       {
-        "name": "LK_ACTIVE_SQL_TABLES",
+        "name": "LK_ACTIVE_ONELAKETABLE_TABLES",
         "type": "Lookup",
         "dependsOn": [],
         "policy": {
@@ -16,7 +16,7 @@
           "source": {
             "type": "FabricSqlDatabaseSource",
             "sqlReaderQuery": {
-              "value": "SELECT * FROM [ingestion].[vw_ActiveIngestTables] WHERE [ConnectionType] = 'Sql'",
+              "value": "SELECT * FROM [ingestion].[vw_ActiveIngestTables] WHERE [ConnectionType] = 'OneLakeTable'",
               "type": "Expression"
             },
             "queryTimeout": "02:00:00",
@@ -38,11 +38,11 @@
         }
       },
       {
-        "name": "FE_SQL_ENTITY",
+        "name": "FE_ONELAKETABLE_ENTITY",
         "type": "ForEach",
         "dependsOn": [
           {
-            "activity": "LK_ACTIVE_SQL_TABLES",
+            "activity": "LK_ACTIVE_ONELAKETABLE_TABLES",
             "dependencyConditions": [
               "Succeeded"
             ]
@@ -50,12 +50,12 @@
         ],
         "typeProperties": {
           "items": {
-            "value": "@activity('LK_ACTIVE_SQL_TABLES').output.value",
+            "value": "@activity('LK_ACTIVE_ONELAKETABLE_TABLES').output.value",
             "type": "Expression"
           },
           "activities": [
             {
-              "name": "CP_SQL_TO_LANDING",
+              "name": "CP_ONELAKETABLE_TO_LANDING",
               "type": "Copy",
               "dependsOn": [],
               "policy": {
@@ -67,16 +67,22 @@
               },
               "typeProperties": {
                 "source": {
-                  "type": "AzureSqlSource",
-                  "sqlReaderQuery": {
-                    "value": "@item().ResolvedSourceQuery",
-                    "type": "Expression"
-                  },
-                  "queryTimeout": "02:00:00",
-                  "partitionOption": "None",
+                  "type": "LakehouseTableSource",
                   "datasetSettings": {
                     "annotations": [],
-                    "type": "AzureSqlTable",
+                    "linkedService": {
+                      "name": "SourceLakehouse",
+                      "properties": {
+                        "annotations": [],
+                        "type": "Lakehouse",
+                        "typeProperties": {
+                          "workspaceId": "@item().ConnectionGuid",
+                          "artifactId": "@item().DatabaseName",
+                          "rootFolder": "Tables"
+                        }
+                      }
+                    },
+                    "type": "LakehouseTable",
                     "schema": [],
                     "typeProperties": {
                       "schema": {
@@ -87,9 +93,6 @@
                         "value": "@item().SourceObject",
                         "type": "Expression"
                       }
-                    },
-                    "externalReferences": {
-                      "connection": "@item().ConnectionGuid"
                     }
                   }
                 },

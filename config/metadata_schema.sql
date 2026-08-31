@@ -26,22 +26,45 @@ GO
 -- its own in this schema.
 -- ============================================================
 
+-- ConnectionType values and what ConnectionGuid/ingestion.Database.Name mean for each:
+--   Sql            -- ConnectionGuid = Fabric Connection GUID (Azure SQL). Database.Name = source database name.
+--   File           -- ConnectionGuid = Fabric Connection GUID (ADLS Gen2). Database.Name = container/filesystem name.
+--   SqlMI          -- ConnectionGuid = Fabric Connection GUID (Azure SQL Managed Instance). Database.Name = source database name.
+--   Oracle         -- ConnectionGuid = Fabric Connection GUID (Oracle, routed through an on-premises Data
+--                     Gateway). Database.Name = source database/service name. The gateway itself is configured
+--                     on the Fabric Connection object, not tracked here -- no extra column needed for it.
+--   Sftp           -- ConnectionGuid = Fabric Connection GUID (SFTP). Database.Name = unused (NULL-ish; use '').
+--   Ftp            -- ConnectionGuid = Fabric Connection GUID (FTP). Database.Name = unused (use '').
+--   OneLakeTable   -- No Fabric Connection object exists for same-tenant cross-workspace OneLake access (Fabric
+--                     addresses it directly by workspace + item GUID, the same mechanism this framework's own
+--                     Landing/Bronze/Gold lakehouse references already use) -- so these two types repurpose the
+--                     columns instead of adding new ones: ConnectionGuid = the SOURCE WORKSPACE GUID, and
+--                     Database.Name = the SOURCE LAKEHOUSE's item GUID (as text, not a display name).
+--   OneLakeFile    -- Same repurposing as OneLakeTable (source workspace GUID / source lakehouse GUID).
+--   Custom         -- Escape hatch for sources with no dedicated connector (REST APIs, SharePoint, Dataverse,
+--                     Salesforce, etc.) -- delegates to a hand-written per-table notebook instead of a generic
+--                     Copy activity (see ingestion.Table.CustomNotebookName below). ConnectionGuid/Database.Name
+--                     are not used by any pipeline for this type; set them to placeholder values.
+-- FMD Framework's "ADF" type (pass-through metadata tracking for an externally-orchestrated ADF pipeline) was
+-- deliberately NOT ported -- it isn't a real data connector, and doesn't fit this framework's self-contained
+-- model where every ingestion runs from inside Keystone's own pipelines.
 IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Connection')
 CREATE TABLE [ingestion].[Connection] (
     [ConnectionId]   INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     [Name]           VARCHAR(200) NOT NULL,
-    [ConnectionType] VARCHAR(10)  NOT NULL,              -- Sql | File
-    [ConnectionGuid] UNIQUEIDENTIFIER NOT NULL,           -- the Fabric Connection item's GUID
+    [ConnectionType] VARCHAR(20)  NOT NULL,              -- Sql | File | SqlMI | Oracle | Sftp | Ftp | OneLakeTable | OneLakeFile | Custom
+    [ConnectionGuid] UNIQUEIDENTIFIER NOT NULL,           -- the Fabric Connection item's GUID (see ConnectionType notes above for exceptions)
     [IsActive]       BIT NOT NULL DEFAULT 1
 )
 GO
 
--- One row per database (Sql) or container/filesystem (File) within a Connection.
+-- One row per database/container/lakehouse within a Connection -- exact meaning of Name depends on
+-- ConnectionType; see the comment above ingestion.Connection.
 IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Database')
 CREATE TABLE [ingestion].[Database] (
     [DatabaseId]   INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     [ConnectionId] INT NOT NULL REFERENCES [ingestion].[Connection]([ConnectionId]),
-    [Name]         VARCHAR(200) NOT NULL,                 -- source database name (Sql) or container/filesystem name (File)
+    [Name]         VARCHAR(200) NOT NULL,                 -- source database name (Sql/SqlMI/Oracle), container/filesystem name (File), or source lakehouse GUID (OneLakeTable/OneLakeFile)
     [IsActive]     BIT NOT NULL DEFAULT 1
 )
 GO
@@ -49,22 +72,23 @@ GO
 -- One row per table drives its ENTIRE Source -> Landing -> Bronze flow when active.
 IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Table')
 CREATE TABLE [ingestion].[Table] (
-    [TableId]           BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [DatabaseId]        INT NOT NULL REFERENCES [ingestion].[Database]([DatabaseId]),
-    [SourceSchema]      NVARCHAR(100) NULL,
-    [SourceObject]      NVARCHAR(200) NOT NULL,          -- source table/query name
-    [SourceQuery]       NVARCHAR(MAX) NULL,              -- optional custom SELECT override; NULL = SELECT *
-    [FilePath]          NVARCHAR(500) NOT NULL,          -- target folder under Landing/Files/
-    [FileType]          VARCHAR(20)   NOT NULL DEFAULT 'parquet',
-    [BronzeSchema]      NVARCHAR(100) NOT NULL,
-    [BronzeName]        NVARCHAR(200) NOT NULL,
-    [PrimaryKeys]       NVARCHAR(200) NOT NULL,          -- comma-separated: dedupe key AND (LoadType='Delta') the MERGE key
-    [LoadType]          VARCHAR(10)   NOT NULL DEFAULT 'Full',  -- Full | Delta
-    [IncrementalColumn] NVARCHAR(100) NULL,              -- required when LoadType = 'Delta'; drives the watermark filter
-    [DeleteHandling]    VARCHAR(20)   NOT NULL DEFAULT 'None',  -- None | SoftDelete | Reconcile
-    [IsDeletedColumn]   NVARCHAR(100) NULL,              -- required when DeleteHandling = 'SoftDelete'
-    [CleansingRules]    NVARCHAR(MAX) NULL,              -- JSON array: dedupe/null-handling/explode rules
-    [IsActive]          BIT NOT NULL DEFAULT 1
+    [TableId]            BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [DatabaseId]         INT NOT NULL REFERENCES [ingestion].[Database]([DatabaseId]),
+    [SourceSchema]       NVARCHAR(100) NULL,
+    [SourceObject]       NVARCHAR(200) NOT NULL,          -- source table/query name
+    [SourceQuery]        NVARCHAR(MAX) NULL,              -- optional custom SELECT override; NULL = SELECT *
+    [FilePath]           NVARCHAR(500) NOT NULL,          -- target folder under Landing/Files/
+    [FileType]           VARCHAR(20)   NOT NULL DEFAULT 'parquet',
+    [BronzeSchema]       NVARCHAR(100) NOT NULL,
+    [BronzeName]         NVARCHAR(200) NOT NULL,
+    [PrimaryKeys]        NVARCHAR(200) NOT NULL,          -- comma-separated: dedupe key AND (LoadType='Delta') the MERGE key
+    [LoadType]           VARCHAR(10)   NOT NULL DEFAULT 'Full',  -- Full | Delta
+    [IncrementalColumn]  NVARCHAR(100) NULL,              -- required when LoadType = 'Delta'; drives the watermark filter
+    [DeleteHandling]     VARCHAR(20)   NOT NULL DEFAULT 'None',  -- None | SoftDelete | Reconcile
+    [IsDeletedColumn]    NVARCHAR(100) NULL,              -- required when DeleteHandling = 'SoftDelete'
+    [CleansingRules]     NVARCHAR(MAX) NULL,              -- JSON array: dedupe/null-handling/explode rules
+    [CustomNotebookName] NVARCHAR(200) NULL,              -- populated only when the row's Connection.ConnectionType = 'Custom' -- the hand-written notebook (config/items.yaml) that lands this table; see DEPLOYMENT.md's "Custom sources" section
+    [IsActive]           BIT NOT NULL DEFAULT 1
 )
 GO
 
@@ -129,4 +153,52 @@ CREATE TABLE [audit].[NotebookRun] (
     [EndTimeUtc]    DATETIME2(7) NULL,
     [ErrorMessage]  NVARCHAR(MAX) NULL
 )
+GO
+
+-- ============================================================
+-- ingestion lookup view -- resolves each active Table row's ready-to-run
+-- SourceQuery in T-SQL (Full = SELECT * or the row's own override; Delta =
+-- the same, watermark-bounded) so a native pipeline Lookup activity can
+-- drive each PL_INGEST_* pipeline directly -- no notebook in the loop, no
+-- pipeline needing its own connection to the metadata catalog beyond the
+-- one bootstrap Connection (see config/environments.yaml's
+-- metadata_connection_guid). Every PL_INGEST_* pipeline's Lookup queries
+-- this same view, filtered to its own ConnectionType.
+--
+-- Excludes ConnectionType = 'Custom' rows -- those are the hand-written
+-- notebook escape hatch (see ingestion.Table.CustomNotebookName above and
+-- DEPLOYMENT.md's "Custom sources" section), not meant to be picked up by
+-- any generic Lookup-driven PL_INGEST_* pipeline.
+--
+-- CREATE VIEW must be the only statement in its batch, so this uses
+-- drop-then-recreate instead of the IF NOT EXISTS-guarded CREATE used for
+-- tables above -- a view has no data to preserve, so re-running this is
+-- exactly as idempotent as everything else in this file.
+-- ============================================================
+
+IF OBJECT_ID('[ingestion].[vw_ActiveIngestTables]', 'V') IS NOT NULL DROP VIEW [ingestion].[vw_ActiveIngestTables]
+GO
+
+CREATE VIEW [ingestion].[vw_ActiveIngestTables] AS
+SELECT
+    t.[TableId], t.[SourceSchema], t.[SourceObject], t.[FilePath], t.[FileType],
+    t.[LoadType], t.[IncrementalColumn],
+    d.[Name] AS DatabaseName, c.[ConnectionGuid], c.[ConnectionType],
+    CASE
+        WHEN t.[LoadType] = 'Delta' THEN
+            'SELECT * FROM (' + base.[BaseQuery] + ') AS w WHERE ' + t.[IncrementalColumn]
+                + ' > ''' + ISNULL(CONVERT(NVARCHAR(100), w.[LastValue], 120), '1900-01-01') + ''''
+        ELSE base.[BaseQuery]
+    END AS ResolvedSourceQuery
+FROM [ingestion].[Table] t
+JOIN [ingestion].[Database] d ON t.[DatabaseId] = d.[DatabaseId]
+JOIN [ingestion].[Connection] c ON d.[ConnectionId] = c.[ConnectionId]
+CROSS APPLY (
+    SELECT CASE
+        WHEN t.[SourceQuery] IS NOT NULL THEN 'SELECT * FROM (' + t.[SourceQuery] + ') AS src_query'
+        ELSE 'SELECT * FROM ' + ISNULL(t.[SourceSchema] + '.', '') + t.[SourceObject]
+    END AS BaseQuery
+) base
+LEFT JOIN [runtime].[LoadWatermark] w ON w.[EntityType] = 'Table' AND w.[EntityId] = t.[TableId]
+WHERE t.[IsActive] = 1 AND d.[IsActive] = 1 AND c.[IsActive] = 1 AND c.[ConnectionType] <> 'Custom'
 GO

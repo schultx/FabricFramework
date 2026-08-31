@@ -15,19 +15,32 @@
 # lakehouse/NB_LOAD_SILVER/PL_LOAD_SILVER from a target environment by hand) once
 # this framework has a real multi-Gold-consumer use case, or none at all.
 
+# metadata_connection_guid: the GUID of the Fabric Connection the ingestion pipelines'
+# native Lookup activities use to query the metadata catalog (ingestion.vw_ActiveIngestTables)
+# directly -- no notebook in the loop. This one Connection is a chicken-and-egg case (you
+# can't look up how to reach the metadata database FROM the metadata database), so unlike
+# every other source Connection -- which lives entirely in ingestion.Connection, referenced
+# only by GUID from there -- this one has to live here in git config. One-time manual step
+# per environment: register a Connection to SQL_METADATA_DATABASE in the Ingestion workspace
+# (service-principal credentials, not Workspace Identity -- see DEPLOYMENT.md), then paste
+# its GUID below. Leave "" until you've done that; PL_INGEST_SQL/PL_INGEST_FILE won't deploy
+# a working Lookup without it.
 environments:
   - name: development
     short: D
     capacity: fabfabricmsa
     include_silver: true
+    metadata_connection_guid: ""
   - name: test
     short: T
     capacity: fabfabricmsa
     include_silver: true
+    metadata_connection_guid: ""
   - name: production
     short: P
     capacity: fabfabricmsa
     include_silver: true
+    metadata_connection_guid: ""
 
 # Entra principals granted access to each workspace TIER (data / ingestion / code).
 # Split per tier, not one flat list applied everywhere -- Ingestion holds source

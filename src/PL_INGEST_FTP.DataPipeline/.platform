@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_FTP",
+    "description": "Metadata-driven Source -> Landing copy for Ftp-type connections. A native Lookup activity queries ingestion.vw_ActiveIngestTables directly (no notebook in the loop) for every active Table row behind an Ftp Connection, then Copies each file straight into Landing, unmodified."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "62815fb0-3dee-4582-af0a-1cb6eb53d3fd"
+  }
+}

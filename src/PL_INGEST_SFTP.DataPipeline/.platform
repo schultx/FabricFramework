@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "PL_INGEST_SFTP",
+    "description": "Metadata-driven Source -> Landing copy for Sftp-type connections. A native Lookup activity queries ingestion.vw_ActiveIngestTables directly (no notebook in the loop) for every active Table row behind an Sftp Connection, then Copies each file straight into Landing, unmodified."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "1439c628-e011-4844-a2da-0c9ec30b9802"
+  }
+}

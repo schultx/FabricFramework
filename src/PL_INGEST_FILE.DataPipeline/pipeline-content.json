@@ -2,8 +2,8 @@
   "properties": {
     "activities": [
       {
-        "name": "NB_LIST_FILE_ENTITIES",
-        "type": "TridentNotebook",
+        "name": "LK_ACTIVE_FILE_TABLES",
+        "type": "Lookup",
         "dependsOn": [],
         "policy": {
           "timeout": "0.01:00:00",
@@ -13,17 +13,28 @@
           "secureOutput": false
         },
         "typeProperties": {
-          "notebookId": "__NB_LIST_ACTIVE_TABLES_ID__",
-          "workspaceId": "__CODE_WORKSPACE_ID__",
-          "parameters": {
-            "connector_type": {
-              "value": {
-                "value": "File",
-                "type": "Expression"
+          "source": {
+            "type": "FabricSqlDatabaseSource",
+            "sqlReaderQuery": {
+              "value": "SELECT * FROM [ingestion].[vw_ActiveIngestTables] WHERE [ConnectionType] = 'File'",
+              "type": "Expression"
+            },
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None",
+            "datasetSettings": {
+              "annotations": [],
+              "type": "FabricSqlDatabaseTable",
+              "schema": [],
+              "typeProperties": {
+                "schema": "ingestion",
+                "table": "vw_ActiveIngestTables"
               },
-              "type": "string"
+              "externalReferences": {
+                "connection": "__METADATA_CONNECTION_GUID__"
+              }
             }
-          }
+          },
+          "firstRowOnly": false
         }
       },
       {
@@ -31,7 +42,7 @@
         "type": "ForEach",
         "dependsOn": [
           {
-            "activity": "NB_LIST_FILE_ENTITIES",
+            "activity": "LK_ACTIVE_FILE_TABLES",
             "dependencyConditions": [
               "Succeeded"
             ]
@@ -39,7 +50,7 @@
         ],
         "typeProperties": {
           "items": {
-            "value": "@json(activity('NB_LIST_FILE_ENTITIES').output.result.exitValue)",
+            "value": "@activity('LK_ACTIVE_FILE_TABLES').output.value",
             "type": "Expression"
           },
           "activities": [

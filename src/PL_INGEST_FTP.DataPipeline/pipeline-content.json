@@ -2,7 +2,7 @@
   "properties": {
     "activities": [
       {
-        "name": "LK_ACTIVE_SQL_TABLES",
+        "name": "LK_ACTIVE_FTP_TABLES",
         "type": "Lookup",
         "dependsOn": [],
         "policy": {
@@ -16,7 +16,7 @@
           "source": {
             "type": "FabricSqlDatabaseSource",
             "sqlReaderQuery": {
-              "value": "SELECT * FROM [ingestion].[vw_ActiveIngestTables] WHERE [ConnectionType] = 'Sql'",
+              "value": "SELECT * FROM [ingestion].[vw_ActiveIngestTables] WHERE [ConnectionType] = 'Ftp'",
               "type": "Expression"
             },
             "queryTimeout": "02:00:00",
@@ -38,11 +38,11 @@
         }
       },
       {
-        "name": "FE_SQL_ENTITY",
+        "name": "FE_FTP_ENTITY",
         "type": "ForEach",
         "dependsOn": [
           {
-            "activity": "LK_ACTIVE_SQL_TABLES",
+            "activity": "LK_ACTIVE_FTP_TABLES",
             "dependencyConditions": [
               "Succeeded"
             ]
@@ -50,12 +50,12 @@
         ],
         "typeProperties": {
           "items": {
-            "value": "@activity('LK_ACTIVE_SQL_TABLES').output.value",
+            "value": "@activity('LK_ACTIVE_FTP_TABLES').output.value",
             "type": "Expression"
           },
           "activities": [
             {
-              "name": "CP_SQL_TO_LANDING",
+              "name": "CP_FTP_TO_LANDING",
               "type": "Copy",
               "dependsOn": [],
               "policy": {
@@ -67,25 +67,30 @@
               },
               "typeProperties": {
                 "source": {
-                  "type": "AzureSqlSource",
-                  "sqlReaderQuery": {
-                    "value": "@item().ResolvedSourceQuery",
-                    "type": "Expression"
+                  "type": "BinarySource",
+                  "storeSettings": {
+                    "type": "FtpReadSettings",
+                    "recursive": true,
+                    "useBinaryTransfer": true,
+                    "disableChunking": false
                   },
-                  "queryTimeout": "02:00:00",
-                  "partitionOption": "None",
+                  "formatSettings": {
+                    "type": "BinaryReadSettings"
+                  },
                   "datasetSettings": {
                     "annotations": [],
-                    "type": "AzureSqlTable",
-                    "schema": [],
+                    "type": "Binary",
                     "typeProperties": {
-                      "schema": {
-                        "value": "@item().SourceSchema",
-                        "type": "Expression"
-                      },
-                      "table": {
-                        "value": "@item().SourceObject",
-                        "type": "Expression"
+                      "location": {
+                        "type": "FtpServerLocation",
+                        "fileName": {
+                          "value": "@item().SourceObject",
+                          "type": "Expression"
+                        },
+                        "folderPath": {
+                          "value": "@item().SourceSchema",
+                          "type": "Expression"
+                        }
                       }
                     },
                     "externalReferences": {
@@ -94,13 +99,10 @@
                   }
                 },
                 "sink": {
-                  "type": "ParquetSink",
+                  "type": "BinarySink",
                   "storeSettings": {
                     "type": "LakehouseWriteSettings",
                     "copyBehavior": "PreserveHierarchy"
-                  },
-                  "formatSettings": {
-                    "type": "ParquetWriteSettings"
                   },
                   "datasetSettings": {
                     "annotations": [],
@@ -116,34 +118,24 @@
                         }
                       }
                     },
-                    "type": "Parquet",
+                    "type": "Binary",
                     "typeProperties": {
                       "location": {
                         "type": "LakehouseLocation",
                         "fileName": {
-                          "value": "@concat(item().SourceObject, '.parquet')",
+                          "value": "@item().SourceObject",
                           "type": "Expression"
                         },
                         "folderPath": {
                           "value": "@item().FilePath",
                           "type": "Expression"
                         }
-                      },
-                      "compressionCodec": "snappy"
+                      }
                     },
                     "schema": []
                   }
                 },
-                "enableStaging": false,
-                "validateDataConsistency": false,
-                "translator": {
-                  "type": "TabularTranslator",
-                  "typeConversion": true,
-                  "typeConversionSettings": {
-                    "allowDataTruncation": true,
-                    "treatBooleanAsNumber": false
-                  }
-                }
+                "enableStaging": false
               }
             }
           ]

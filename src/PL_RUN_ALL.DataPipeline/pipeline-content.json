@@ -66,6 +66,198 @@
         }
       },
       {
+        "name": "EP_INGEST_SQLMI",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_SQLMI_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "EP_INGEST_ORACLE",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_ORACLE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "EP_INGEST_SFTP",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_SFTP_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "EP_INGEST_FTP",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_FTP_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "EP_INGEST_ONELAKETABLE",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_ONELAKETABLE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "EP_INGEST_ONELAKEFILE",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "__NB_RUN_REMOTE_PIPELINE_ID__",
+          "workspaceId": "__CODE_WORKSPACE_ID__",
+          "parameters": {
+            "target_workspace_id": {
+              "value": {
+                "value": "__INGESTION_WORKSPACE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "target_item_id": {
+              "value": {
+                "value": "__PL_INGEST_ONELAKEFILE_ID__",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
         "name": "EP_LOAD_BRONZE",
         "type": "ExecutePipeline",
         "dependsOn": [
@@ -77,6 +269,42 @@
           },
           {
             "activity": "EP_INGEST_FILE",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          },
+          {
+            "activity": "EP_INGEST_SQLMI",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          },
+          {
+            "activity": "EP_INGEST_ORACLE",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          },
+          {
+            "activity": "EP_INGEST_SFTP",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          },
+          {
+            "activity": "EP_INGEST_FTP",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          },
+          {
+            "activity": "EP_INGEST_ONELAKETABLE",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          },
+          {
+            "activity": "EP_INGEST_ONELAKEFILE",
             "dependencyConditions": [
               "Succeeded"
             ]
