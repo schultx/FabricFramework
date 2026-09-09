@@ -1,4 +1,4 @@
-# Keystone
+# Monza
 
 A lean, metadata-driven Fabric framework for Data Platform + AI teams. Three
 workspaces per environment, three lakehouses (four if you need it), one
@@ -16,9 +16,9 @@ repo specifically.
 
 | Workspace | Holds |
 |---|---|
-| `Keystone Data (D/T/P)` | Lakehouses only, at workspace root: `Landing`, `Bronze`, `Gold`, and `Silver` **only if** that environment sets `include_silver: true` |
-| `Keystone Ingestion (D/T/P)` | `SQL_METADATA_DATABASE` (root) + any registered source Connections, and every `PL_INGEST_*` ingestion pipeline that reads them, under a `Pipelines/` folder |
-| `Keystone Code (D/T/P)` | Everything else executable, under `Notebooks/` (every loader + Gold/Silver notebook, `NB_KEYSTONE_FUNCTIONS`, `NB_RUN_REMOTE_PIPELINE`) and `Pipelines/` (`PL_RUN_ALL` and the other orchestration/load pipelines) — `VAR_KEYSTONE` (one Variable Library) stays at workspace root |
+| `Monza Data (D/T/P)` | Lakehouses only, at workspace root: `Landing`, `Bronze`, `Gold`, and `Silver` **only if** that environment sets `include_silver: true` |
+| `Monza Ingestion (D/T/P)` | `SQL_METADATA_DATABASE` (root) + any registered source Connections, and every `PL_INGEST_*` ingestion pipeline that reads them, under a `Pipelines/` folder |
+| `Monza Code (D/T/P)` | Everything else executable, under `Notebooks/` (every loader + Gold/Silver notebook, `NB_MONZA_FUNCTIONS`, `NB_RUN_REMOTE_PIPELINE`) and `Pipelines/` (`PL_RUN_ALL` and the other orchestration/load pipelines) — `VAR_MONZA` (one Variable Library) stays at workspace root |
 
 Folders are created via Fabric's Folder REST API, which is **Preview** as of
 this writing — see [DEPLOYMENT.md](DEPLOYMENT.md#workspace-folders).

@@ -17,8 +17,8 @@ sidesteps the bug at the root instead of working around it.)
 ## What it does, per environment
 
 1. Resolves the target Fabric capacity
-2. Creates/updates the three workspaces: `Keystone Data (X)`,
-   `Keystone Ingestion (X)`, `Keystone Code (X)`
+2. Creates/updates the three workspaces: `Monza Data (X)`,
+   `Monza Ingestion (X)`, `Monza Code (X)`
 3. Creates `Landing` / `Bronze` / `Gold` lakehouses in Data (+ `Silver` if
    `config/environments.yaml` sets `include_silver: true` for that environment)
 4. Creates the `SQL_METADATA_DATABASE` SQL Database in Ingestion and applies
@@ -43,9 +43,9 @@ sidesteps the bug at the root instead of working around it.)
 ### Workspace folders
 
 The Code workspace gets `Notebooks/` (every loader + Gold/Silver notebook,
-`NB_KEYSTONE_FUNCTIONS`, `NB_RUN_REMOTE_PIPELINE`) and `Pipelines/`
+`NB_MONZA_FUNCTIONS`, `NB_RUN_REMOTE_PIPELINE`) and `Pipelines/`
 (`PL_LOAD_*`, `PL_RUN_ALL`); the Ingestion workspace gets `Pipelines/` (every
-`PL_INGEST_*`). `VAR_KEYSTONE`, the lakehouses, and `SQL_METADATA_DATABASE`
+`PL_INGEST_*`). `VAR_MONZA`, the lakehouses, and `SQL_METADATA_DATABASE`
 stay at workspace root — not everything needs a folder.
 
 Fabric's Folder REST API (`POST .../folders`, and the `folderId` field on
@@ -76,7 +76,7 @@ overwrite-content-if-exists).
 The very first run has to happen by hand, because Azure DevOps needs
 something already inside Fabric to call:
 
-1. Create a workspace (e.g. `Keystone Deploy`) — any workspace, Contributor
+1. Create a workspace (e.g. `Monza Deploy`) — any workspace, Contributor
    role is enough for you personally at this point.
 2. Download `setup/NB_DEPLOY.ipynb` from this repo and import it into that
    workspace (Fabric UI → **Import notebook**).
@@ -149,7 +149,7 @@ This is a one-time manual step per environment, done after that environment's
 first `NB_DEPLOY` run (so `SQL_METADATA_DATABASE` and the Ingestion workspace
 already exist):
 
-1. In the Fabric portal, open the `Keystone Ingestion (X)` workspace and
+1. In the Fabric portal, open the `Monza Ingestion (X)` workspace and
    register a new Connection to `SQL_METADATA_DATABASE` (**New item →
    Connection**, or via **Manage connections and gateways**)
 2. Credential it with a **service principal**, not Workspace Identity. An
@@ -198,7 +198,7 @@ pattern):
 `ADF` (FMD Framework's pass-through metadata tracking for an
 externally-orchestrated ADF pipeline) was deliberately not ported — it isn't
 a real data connector, and doesn't fit this framework's self-contained model
-where every ingestion runs from inside Keystone's own pipelines.
+where every ingestion runs from inside Monza's own pipelines.
 
 To add a table for any non-`Custom` type above:
 
@@ -233,7 +233,7 @@ rows entirely (no `PL_INGEST_*` Lookup will ever pick one up), and instead you
 hand-write a per-table notebook, the same way Silver and Gold already work:
 
 1. Write a `custom_<name>.Notebook` mirroring `dim_customer.Notebook` /
-   `sil_customer.Notebook`'s shape (`%run NB_KEYSTONE_FUNCTIONS`, then
+   `sil_customer.Notebook`'s shape (`%run NB_MONZA_FUNCTIONS`, then
    whatever the source needs — call a REST API, page through results, land
    the result as parquet in `Landing/Files/<path>` for `NB_LOAD_BRONZE` to
    pick up normally, or write straight to Bronze yourself if there's no

@@ -1,4 +1,4 @@
--- Keystone metadata catalog
+-- Monza metadata catalog
 -- Deployed once (and re-run safely on every deploy) into SQL_METADATA_DATABASE by
 -- setup/NB_DEPLOY.ipynb. Every statement is idempotent (guarded on existence) so
 -- re-running this file never fails on an already-deployed database.
@@ -47,7 +47,7 @@ GO
 --                     are not used by any pipeline for this type; set them to placeholder values.
 -- FMD Framework's "ADF" type (pass-through metadata tracking for an externally-orchestrated ADF pipeline) was
 -- deliberately NOT ported -- it isn't a real data connector, and doesn't fit this framework's self-contained
--- model where every ingestion runs from inside Keystone's own pipelines.
+-- model where every ingestion runs from inside Monza's own pipelines.
 IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Connection')
 CREATE TABLE [ingestion].[Connection] (
     [ConnectionId]   INT IDENTITY(1,1) NOT NULL PRIMARY KEY,

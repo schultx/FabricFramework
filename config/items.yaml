@@ -6,13 +6,13 @@
 # `Code` when omitted, so most entries don't need to mention it at all.
 
 items:
-  - name: VAR_KEYSTONE
+  - name: VAR_MONZA
     type: VariableLibrary
-    path: VAR_KEYSTONE.VariableLibrary
+    path: VAR_MONZA.VariableLibrary
 
-  - name: NB_KEYSTONE_FUNCTIONS
+  - name: NB_MONZA_FUNCTIONS
     type: Notebook
-    path: NB_KEYSTONE_FUNCTIONS.Notebook
+    path: NB_MONZA_FUNCTIONS.Notebook
 
   - name: NB_RUN_REMOTE_PIPELINE
     type: Notebook

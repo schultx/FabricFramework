@@ -23,7 +23,7 @@
 # MARKDOWN ********************
 
 # # fact_signup (demo)
-# Gold fact built with `load_fact()` from `NB_KEYSTONE_FUNCTIONS`, sourced
+# Gold fact built with `load_fact()` from `NB_MONZA_FUNCTIONS`, sourced
 # directly from Bronze -- one row per customer signup event, grained on
 # `SubscriptionDate`.
 #
@@ -41,7 +41,7 @@
 
 # CELL ********************
 
-%run NB_KEYSTONE_FUNCTIONS
+%run NB_MONZA_FUNCTIONS
 
 # METADATA ********************
 

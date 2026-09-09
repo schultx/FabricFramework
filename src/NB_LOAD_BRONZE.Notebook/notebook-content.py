@@ -32,7 +32,7 @@
 # - **Full** -- overwrite Bronze completely every run. Deletes are handled for
 #   free since Bronze exactly mirrors the latest full extract.
 # - **Delta** -- `MERGE` (upsert) the batch into Bronze keyed by `PrimaryKeys`
-#   (same `DeltaTable` MERGE idiom as `NB_KEYSTONE_FUNCTIONS`'s Gold facade),
+#   (same `DeltaTable` MERGE idiom as `NB_MONZA_FUNCTIONS`'s Gold facade),
 #   then advance `runtime.LoadWatermark` to `MAX(IncrementalColumn)` seen.
 #
 # `ingestion.Table.DeleteHandling` is only meaningful for Delta entities:
@@ -50,7 +50,7 @@
 # / `{"type": "dedupe_keep_latest", "orderBy": "..."}`).
 #
 # One `audit.NotebookRun` row per run (`start_notebook_run`/`end_notebook_run`,
-# `NB_KEYSTONE_FUNCTIONS`). A bad table doesn't abort the whole run -- each
+# `NB_MONZA_FUNCTIONS`). A bad table doesn't abort the whole run -- each
 # entity's load is wrapped in its own try/except, so one malformed source
 # doesn't block every other active table; failures are collected and the run
 # still ends 'Failed' overall (after everything else has had its turn), so
@@ -59,7 +59,7 @@
 
 # CELL ********************
 
-%run NB_KEYSTONE_FUNCTIONS
+%run NB_MONZA_FUNCTIONS
 
 # METADATA ********************
 

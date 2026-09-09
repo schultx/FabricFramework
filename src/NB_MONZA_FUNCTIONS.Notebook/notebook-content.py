@@ -11,7 +11,7 @@
 
 # MARKDOWN ********************
 
-# # Keystone Functions
+# # Monza Functions
 # Shared library for the Code workspace: `%run` this from any loader notebook.
 #
 # - **Runtime helpers** — resolve the Data workspace and its lakehouses by name
