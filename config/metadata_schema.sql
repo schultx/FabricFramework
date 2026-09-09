@@ -186,17 +186,21 @@ SELECT
     d.[Name] AS DatabaseName, c.[ConnectionGuid], c.[ConnectionType],
     CASE
         WHEN t.[LoadType] = 'Delta' THEN
-            'SELECT * FROM (' + base.[BaseQuery] + ') AS w WHERE ' + t.[IncrementalColumn]
-                + ' > ''' + ISNULL(CONVERT(NVARCHAR(100), w.[LastValue], 120), '1900-01-01') + ''''
+            -- QUOTENAME the incremental column -- a source column name that's a
+            -- reserved word or needs bracket-quoting would otherwise break the
+            -- generated SQL a PL_INGEST_* Lookup actually runs.
+            'SELECT * FROM (' + base.[BaseQuery] + ') AS w WHERE ' + QUOTENAME(t.[IncrementalColumn])
+                + ' > ''' + ISNULL(w.[LastValue], '1900-01-01') + ''''
         ELSE base.[BaseQuery]
     END AS ResolvedSourceQuery
 FROM [ingestion].[Table] t
 JOIN [ingestion].[Database] d ON t.[DatabaseId] = d.[DatabaseId]
 JOIN [ingestion].[Connection] c ON d.[ConnectionId] = c.[ConnectionId]
 CROSS APPLY (
+    -- QUOTENAME the source schema/object for the same reason as IncrementalColumn above.
     SELECT CASE
         WHEN t.[SourceQuery] IS NOT NULL THEN 'SELECT * FROM (' + t.[SourceQuery] + ') AS src_query'
-        ELSE 'SELECT * FROM ' + ISNULL(t.[SourceSchema] + '.', '') + t.[SourceObject]
+        ELSE 'SELECT * FROM ' + ISNULL(QUOTENAME(t.[SourceSchema]) + '.', '') + QUOTENAME(t.[SourceObject])
     END AS BaseQuery
 ) base
 LEFT JOIN [runtime].[LoadWatermark] w ON w.[EntityType] = 'Table' AND w.[EntityId] = t.[TableId]
