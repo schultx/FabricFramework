@@ -41,7 +41,7 @@
 # 1. Read `dbo.customer` -- unqualified by lakehouse name since Bronze is this
 #    notebook's own default lakehouse; only *sibling* lakehouses need the
 #    3-part `lakehouse.schema.table` form
-# 2. Build `temp_dim_customer_history` with a `customer_key` business key
+# 2. Build `temp_dim_customer_history` with a `customer_history_key` business key
 # 3. Load to `gold.dim_customer_history` via `load_dimension()` (SCD2)
 #
 # ## Exercising the history path live
@@ -111,9 +111,12 @@ spark.read.format("delta").load(
 # MAGIC
 # MAGIC CREATE OR REPLACE TEMPORARY VIEW temp_dim_customer_history AS
 # MAGIC SELECT
-# MAGIC     -- Business key (same convention as dim_customer -- auto-mapped by fact
-# MAGIC     -- tables via '_key' -> '_sk', see fact_signup's customer_history_key)
-# MAGIC     CAST(CustomerId AS STRING) AS customer_key,
+# MAGIC     -- Business key -- named to match this dimension's OWN table name
+# MAGIC     -- (customer_history), not dim_customer's. _discover_and_map_foreign_keys
+# MAGIC     -- requires the fact's '<name>_key' column and the dimension's own
+# MAGIC     -- business-key column to be named identically for the join to resolve --
+# MAGIC     -- see fact_signup's customer_history_key.
+# MAGIC     CAST(CustomerId AS STRING) AS customer_history_key,
 # MAGIC
 # MAGIC     -- Tracked attributes -- a change to any of these forms a new history row
 # MAGIC     FirstName,
