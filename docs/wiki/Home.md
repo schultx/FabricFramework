@@ -18,6 +18,8 @@ same structure for a new client, quickly, with a consistent, repeatable delivery
   lakehouse topology, then [Metadata-Model](Metadata-Model.md) for how ingestion is actually
   driven.
 - **Adding a client's source system?** [Connector-Types](Connector-Types.md).
+- **How does incremental loading actually work, end to end?** [Incremental-Loading](Incremental-Loading.md).
+- **Curious about Materialized Lake Views for dim/fact?** [Materialized-Lake-Views](Materialized-Lake-Views.md) — a forward-looking design showcase, not current-state.
 - **Deploying, or setting up WIF / the metadata Connection?** [Deployment-Guide](Deployment-Guide.md).
 - **Something broke?** [Operations-Guide](Operations-Guide.md) — a troubleshooting playbook built
   from real incidents hit while building and testing this exact framework, not generic advice.
@@ -29,7 +31,9 @@ same structure for a new client, quickly, with a consistent, repeatable delivery
 |---|---|
 | [Architecture](Architecture.md) | Workspace topology, medallion lakehouses, folders, naming |
 | [Metadata-Model](Metadata-Model.md) | `ingestion.Connection`/`Database`/`Table`, Full/Delta load, watermarking, audit |
+| [Incremental-Loading](Incremental-Loading.md) | One continuous walkthrough of a Delta-load table, Landing → Gold |
 | [Connector-Types](Connector-Types.md) | All 9 source connector types + how to add a new source table |
+| [Materialized-Lake-Views](Materialized-Lake-Views.md) | Design showcase: MLVs for a dim/fact setup (not built today) |
 | [Deployment-Guide](Deployment-Guide.md) | How `NB_DEPLOY` works, WIF setup, `metadata_connection_guid` setup |
 | [Operations-Guide](Operations-Guide.md) | Running `PL_RUN_ALL`, audit trail, troubleshooting playbook |
 | [New-Client-Onboarding](New-Client-Onboarding.md) | The ordered runbook for a brand-new client engagement |

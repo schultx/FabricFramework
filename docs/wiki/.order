@@ -2,7 +2,9 @@ Home
 New-Client-Onboarding
 Architecture
 Metadata-Model
+Incremental-Loading
 Connector-Types
+Materialized-Lake-Views
 Deployment-Guide
 Operations-Guide
 Improvement-Roadmap
