@@ -23,7 +23,7 @@ same structure for a new client, quickly, with a consistent, repeatable delivery
 - **Deploying, or setting up WIF / the metadata Connection?** [Deployment-Guide](Deployment-Guide.md).
 - **Something broke?** [Operations-Guide](Operations-Guide.md) — a troubleshooting playbook built
   from real incidents hit while building and testing this exact framework, not generic advice.
-- **Deciding what to improve next?** [Improvement-Roadmap](Improvement-Roadmap.md).
+- **Deciding what to improve next?** [Improvement-Roadmap](Improvement-Roadmap.md) (round 1, completed) and [Improvement-Roadmap-2](Improvement-Roadmap-2.md) (round 2, including governance/security research — not yet actioned).
 
 ## Pages
 
@@ -37,7 +37,8 @@ same structure for a new client, quickly, with a consistent, repeatable delivery
 | [Deployment-Guide](Deployment-Guide.md) | How `NB_DEPLOY` works, WIF setup, `metadata_connection_guid` setup |
 | [Operations-Guide](Operations-Guide.md) | Running `PL_RUN_ALL`, audit trail, troubleshooting playbook |
 | [New-Client-Onboarding](New-Client-Onboarding.md) | The ordered runbook for a brand-new client engagement |
-| [Improvement-Roadmap](Improvement-Roadmap.md) | What's worth fixing next, and why, ranked |
+| [Improvement-Roadmap](Improvement-Roadmap.md) | Round 1: 33 findings, all fixed and live-tested |
+| [Improvement-Roadmap-2](Improvement-Roadmap-2.md) | Round 2: deeper code review + Fabric governance/security/platform research — not yet actioned |
 
 ## Ground truth
 
