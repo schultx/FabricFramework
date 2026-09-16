@@ -3,7 +3,7 @@
   "metadata": {
     "type": "Notebook",
     "displayName": "fact_signup",
-    "description": "Gold fact, sourced directly from Bronze.dbo.customer, using SubscriptionDate as the signup event. Demo pair with dim_customer, built on demodata/customer.csv."
+    "description": "Gold fact, sourced directly from Bronze.dbo.customer, using SubscriptionDate as the signup event. Maps FKs against both dim_customer (SCD1) and dim_customer_history (SCD2), built on demodata/customer.csv."
   },
   "config": {
     "version": "2.0",

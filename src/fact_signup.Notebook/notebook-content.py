@@ -27,15 +27,23 @@
 # directly from Bronze -- one row per customer signup event, grained on
 # `SubscriptionDate`.
 #
-# **Run `dim_customer` before this notebook** -- `load_fact()` auto-maps
-# `customer_key` to `customer_sk` by looking up `gold.dim_customer`, which
-# must already exist.
+# **Run `dim_customer` and `dim_customer_history` before this notebook** --
+# `load_fact()` auto-maps `customer_key` to `customer_sk` (via `gold.dim_customer`)
+# and `customer_history_key` to `customer_history_sk` (via
+# `gold.dim_customer_history`), so both must already exist. The second mapping
+# is deliberate: it's the live proof that a fact joined against an SCD2
+# dimension resolves against the *current* row only, not every historical
+# version (Improvement-Roadmap.md, Silver & Gold #1) -- `dim_customer_history`
+# is the only SCD2 dimension in this framework, so this is the only place that
+# fix is exercised by anything runnable.
 #
 # ## Data flow
 # 1. Read `dbo.customer` -- unqualified by lakehouse name since Bronze is
 #    this notebook's own default lakehouse; only *sibling* lakehouses need
 #    the 3-part `lakehouse.schema.table` form
-# 2. Build `temp_fact_signup` with a `customer_key` business key and the
+# 2. Build `temp_fact_signup` with a `customer_key` and `customer_history_key`
+#    business key (same value, both `CustomerId` -- one row can legitimately
+#    carry more than one `_key` column, each auto-mapped independently) and the
 #    signup date as the fact's only measure-adjacent attribute
 # 3. Load to `gold.fact_signup` via `load_fact()` (full overwrite, auto FK mapping on)
 
@@ -91,8 +99,12 @@ spark.read.format("delta").load(
 # MAGIC
 # MAGIC CREATE OR REPLACE TEMPORARY VIEW temp_fact_signup AS
 # MAGIC SELECT
-# MAGIC     -- Business key -> auto-mapped to dim_customer.customer_sk by load_fact()
+# MAGIC     -- Business keys -> each auto-mapped independently by load_fact():
+# MAGIC     -- customer_key against dim_customer (SCD1), customer_history_key
+# MAGIC     -- against dim_customer_history (SCD2) -- same source value, two
+# MAGIC     -- separate dimensions, on purpose (see markdown above).
 # MAGIC     CAST(CustomerId AS STRING) AS customer_key,
+# MAGIC     CAST(CustomerId AS STRING) AS customer_history_key,
 # MAGIC
 # MAGIC     -- Degenerate dimension / event grain
 # MAGIC     CAST(SubscriptionDate AS DATE) AS SignupDate,

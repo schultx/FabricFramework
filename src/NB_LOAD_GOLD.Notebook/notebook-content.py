@@ -27,10 +27,12 @@
 # facts that reference them (`load_fact()` looks up each `_key` column against
 # an already-built `gold.dim_*` table).
 #
-# Currently wired to the demo pair: `dim_customer` -> `fact_signup`. Add each
-# new dimension notebook above its dependent fact notebook as the business
-# domain grows -- Gold is deliberately NOT metadata-loop-driven: every object
-# gets its own hand-written notebook, %run-chained here.
+# Currently wired to: `dim_customer` (SCD1) and `dim_customer_history` (SCD2,
+# the framework's history-tracking reference example) -> `fact_signup`, which
+# maps a foreign key against both. Add each new dimension notebook above its
+# dependent fact notebook as the business domain grows -- Gold is deliberately
+# NOT metadata-loop-driven: every object gets its own hand-written notebook,
+# %run-chained here.
 #
 # One `audit.NotebookRun` row per run, opened here and closed 'Succeeded' at
 # the bottom. Limitation worth knowing: `%run` failures abort the notebook
@@ -65,6 +67,17 @@ run_guid = start_notebook_run("NB_LOAD_GOLD")
 # CELL ********************
 
 %run dim_customer
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+%run dim_customer_history
 
 # METADATA ********************
 

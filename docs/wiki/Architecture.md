@@ -10,7 +10,7 @@ Every environment (development / test / production) gets exactly three Fabric wo
 |---|---|---|
 | **Data** | Lakehouses only | `Landing`, `Bronze`, `Gold`, and `Silver` (conditional — see below) |
 | **Ingestion** | Source-facing plumbing | `SQL_METADATA_DATABASE` (Fabric SQL Database), source Connections (registered in the Fabric portal, referenced by GUID from `ingestion.Connection` — see [Metadata-Model](Metadata-Model.md)), and every `PL_INGEST_<TYPE>` pipeline |
-| **Code** | Everything else | Loader/orchestrator notebooks (`NB_MONZA_FUNCTIONS`, `NB_RUN_REMOTE_PIPELINE`, `NB_LOAD_BRONZE`, `NB_LOAD_SILVER`, `NB_LOAD_GOLD`), per-table Silver/Gold notebooks (e.g. `sil_customer`, `dim_customer`, `fact_signup` in the seeded demo — a real client build adds one per table here, following the same naming pattern), `PL_LOAD_BRONZE`/`PL_LOAD_SILVER`/`PL_LOAD_GOLD`/`PL_RUN_ALL` pipelines, and one Variable Library (`VAR_MONZA`) |
+| **Code** | Everything else | Loader/orchestrator notebooks (`NB_MONZA_FUNCTIONS`, `NB_RUN_REMOTE_PIPELINE`, `NB_LOAD_BRONZE`, `NB_LOAD_SILVER`, `NB_LOAD_GOLD`), per-table Silver/Gold notebooks (e.g. `sil_customer`, `dim_customer`, `dim_customer_history`, `fact_signup` in the seeded demo — a real client build adds one per table here, following the same naming pattern), `PL_LOAD_BRONZE`/`PL_LOAD_SILVER`/`PL_LOAD_GOLD`/`PL_RUN_ALL` pipelines, and one Variable Library (`VAR_MONZA`) |
 
 `config/items.yaml` is the source of truth for this split: each item entry has a `workspace` field (`Code` or `Ingestion`) that defaults to `Code` when omitted — which is why most `items.yaml` entries don't bother stating it. Only the eight `PL_INGEST_*` pipeline entries set `workspace: Ingestion` explicitly.
 

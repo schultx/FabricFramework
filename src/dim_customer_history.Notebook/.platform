@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "dim_customer_history",
+    "description": "SCD2 reference example: the same Bronze.dbo.customer source as dim_customer, modeled as history-tracked instead of overwrite-in-place. This is the framework's regression check for write_dimension_type2 -- dim_customer alone (SCD1) never exercises that code path at all."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "d87f127f-ba6e-4690-88b5-801f7bd4d3f7"
+  }
+}

@@ -576,21 +576,21 @@ type and a hard, repeating failure on the other.
 
 *Severity: high*
 
-**Status: Fixed.** FK auto-mapping now filters to the current row when `IS_CURRENT_COL` exists on the dimension.
+**Status: Fixed, and now live-tested.** FK auto-mapping filters to the current row when `IS_CURRENT_COL` exists on the dimension — `dim_customer_history` (a new SCD2 reference example) plus `fact_signup`'s `customer_history_key` mapping now exercise this exact path via the real `%run` chain, closing the "demo can't catch this" gap this finding originally called out.
 
 `_discover_and_map_foreign_keys` never filters on `IS_CURRENT_COL` when joining a fact's `_key`
 column against a dimension table. Harmless for SCD1 (one row per business key) — but
 `write_dimension_type2` deliberately keeps multiple physical rows per business key (an expired
 row plus a current row, each with a *different* surrogate key). A fact joined against any
 dimension with real history matches **both** rows and is silently duplicated in the output — one
-copy per historical version. The shipped demo can't catch this: `dim_customer` hardcodes
-`dimension_type = 'scd1'`, so the bug is invisible until a real client dimension that actually
-needs history (the entire point of offering SCD2) is joined by a fact.
+copy per historical version. The shipped demo previously couldn't catch this: `dim_customer`
+hardcodes `dimension_type = 'scd1'`, so the bug was invisible until a real dimension with history
+was joined by a fact.
 
 **Fix:** filter the dimension read to the current row before joining
-(`.filter(F.col(IS_CURRENT_COL) != False)` when the column exists). Add a demo/test case with an
-actual SCD2 dimension carrying 2+ versions of one member joined by a fact, since the current
-structure structurally cannot catch this class of bug.
+(`.filter(F.col(IS_CURRENT_COL) != False)` when the column exists). `dim_customer_history` is that
+demo/test case — an actual SCD2 dimension, joined by `fact_signup` — so this class of bug is now
+structurally catchable going forward, not just fixed once.
 
 ### 2. `full_refresh` on an existing dimension silently reassigns every surrogate key, and for SCD2 drops history
 

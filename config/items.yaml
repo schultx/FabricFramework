@@ -41,6 +41,10 @@ items:
     type: Notebook
     path: dim_customer.Notebook
 
+  - name: dim_customer_history
+    type: Notebook
+    path: dim_customer_history.Notebook
+
   - name: fact_signup
     type: Notebook
     path: fact_signup.Notebook
