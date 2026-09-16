@@ -1,6 +1,12 @@
 # One entry per environment NB_DEPLOY.ipynb can target. `short` is used in workspace
 # display names: "Monza Data (D)", "Monza Data (T)", "Monza Data (P)".
 #
+# framework_name: the prefix on every workspace this environment deploys ("<framework_name>
+# Data (X)", "<framework_name> Ingestion (X)", "<framework_name> Code (X)"). Defaults to
+# "Monza" -- set to a client/engagement name when onboarding a new client so workspace
+# naming no longer requires hand-editing setup/build_nb_deploy.py (see
+# New-Client-Onboarding.md step 2).
+#
 # include_silver: only the environments that actually need shared Gold logic should
 # set this true -- it's what makes the Silver lakehouse (and its pipeline/notebook)
 # conditional rather than a permanent fixture. Leave false until a real Bronze entity
@@ -28,16 +34,19 @@
 environments:
   - name: development
     short: D
+    framework_name: Monza
     capacity: Trial-20260916T102156Z-SXyTKCCwy06fHGjMeQxDSA
     include_silver: true
     metadata_connection_guid: ""
   - name: test
     short: T
+    framework_name: Monza
     capacity: Trial-20260916T102156Z-SXyTKCCwy06fHGjMeQxDSA
     include_silver: true
     metadata_connection_guid: ""
   - name: production
     short: P
+    framework_name: Monza
     capacity: Trial-20260916T102156Z-SXyTKCCwy06fHGjMeQxDSA
     include_silver: true
     metadata_connection_guid: ""

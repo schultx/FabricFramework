@@ -120,6 +120,30 @@ The service principal(s) behind `FABRIC_CLIENT_ID`/`FABRIC_CLIENT_SECRET`/`FABRI
 
 One nuance: Fabric Connection objects (like the `metadata_connection_guid` Connection above) don't support WIF-style federated auth themselves — they need an actual client secret. WIF and a stored secret aren't mutually exclusive on the same app registration, though: the same per-environment SPN created in step 2 can *also* have a plain secret added under its Entra app registration (**Certificates & secrets → New client secret**), and that secret is what you hand to the `SQL_METADATA_DATABASE` Connection's service-principal credential in the walkthrough above. One SPN, two auth paths, used for two different things.
 
+### Pipeline cut-over status: provisioned, not yet wired in
+
+**As of this writing, the WIF service connections above are provisioned but `azure-pipelines.yml` has not been cut over to use them.** All three stages (`Dev`/`Test`/`Prod`, via the shared `templates/deploy-stage.yml`) still authenticate with the classic client-secret flow — `FABRIC_CLIENT_ID`/`FABRIC_CLIENT_SECRET`/`FABRIC_TENANT_ID` from the single shared `fabric-framework-secrets` variable group — exactly the single-shared-secret blast-radius problem this section's `fabricframework-<env>-wif` connections were meant to retire. This is tracked as Improvement-Roadmap.md's CI/CD #1; the migration itself needs the actual named service connections to exist in this repo's Azure DevOps project, which can't be done or verified from the repo alone. `templates/deploy-stage.yml`'s `env:` block carries a `TODO` comment with the same sketch reproduced here.
+
+Cutting a stage over means two changes together, not one:
+
+1. **In `templates/deploy-stage.yml`**, give the deploy step a `serviceConnection` instead of a plain `script:`/`env:` block, e.g. (for the `${{ parameters.envArg }}` stage this template is instantiated for):
+
+   ```yaml
+   - task: AzureCLI@2
+     inputs:
+       azureSubscription: fabricframework-${{ parameters.envArg }}-wif
+       scriptType: bash
+       scriptLocation: inlineScript
+       inlineScript: |
+         python deploy/run_notebook.py --environment ${{ parameters.envArg }} --commit $(Build.SourceVersion)
+   ```
+
+   `AzureCLI@2` with a WIF-backed `azureSubscription` exports short-lived federated credentials into the task's environment (`AZURE_CLIENT_ID` / `AZURE_TENANT_ID` plus an auto-refreshed federated token) rather than a stored secret.
+
+2. **In `deploy/run_notebook.py`**, `get_token()` needs a federated-token code path alongside (or instead of) today's `client_credential=os.environ["FABRIC_CLIENT_SECRET"]` — MSAL's `ConfidentialClientApplication` supports this via a `client_credential={"client_assertion": <federated JWT>}` (or an assertion callback) instead of a plain secret string, sourced from whatever `AzureCLI@2` / the ADO WIF task exposes for the current job.
+
+Only after both land — and `FABRIC_CLIENT_SECRET` is deleted from the `fabric-framework-secrets` variable group so the secret is actually retired, not just unused — is the migration this section describes actually complete.
+
 ## Capacity assignment and the stale-capacity trap
 
 `NB_DEPLOY` resolves the target capacity **by name**, every run, for every environment:

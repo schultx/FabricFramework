@@ -107,12 +107,14 @@ spark.read.format("delta").load(
 
 # CELL ********************
 
-silver_df = spark.table('temp_silver_customer').withColumn("silver_loaded_datetime", F.current_timestamp())
+silver_df = spark.table('temp_silver_customer')
 
-_ensure_schema("Silver", silver_schema)
-target_table = f"Silver.{silver_schema}.{silver_name}"
-silver_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(target_table)
-print(f"wrote {silver_df.count()} rows to {target_table}")
+write_silver_table(
+    df=silver_df,
+    lakehouse_name="Silver",
+    table_name=silver_name,
+    schema_name=silver_schema
+)
 
 # METADATA ********************
 

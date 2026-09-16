@@ -1,2 +1,8 @@
-requests>=2.31
-msal>=1.28
+# Pinned exact (Improvement-Roadmap.md, CI/CD #8) so a newer release published between a
+# Dev run and a days-later Test/Prod approval can't install for Prod without having been
+# exercised in Dev first. Bump deliberately, in its own commit, verified against a real
+# `pip install` -- these two pins were chosen as reasonable current stable releases without
+# being able to query PyPI from this environment; re-verify/bump them the next time CI
+# actually runs pip install.
+requests==2.32.3
+msal==1.31.0

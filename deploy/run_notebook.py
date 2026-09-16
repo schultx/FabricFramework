@@ -22,6 +22,12 @@ items are detected and skipped/updated, not recreated). A real, non-transient bu
 notebook's own logic will fail identically on every attempt and still surface after the
 retries are exhausted.
 
+Individual HTTP calls made while polling (poll_lro, the job status-poll loop) and while
+baking the environment parameter (set_environment_parameter) also get a small, separate
+retry/backoff for transient network blips and 429/503 responses -- see
+_request_with_retry -- so a momentary hiccup during the up-to-one-hour polling window
+doesn't crash the whole script and skip the outer retry loop entirely.
+
 Required env vars:
     FABRIC_CLIENT_ID, FABRIC_CLIENT_SECRET, FABRIC_TENANT_ID  -- service principal
     FABRIC_WORKSPACE_ID, FABRIC_NOTEBOOK_ID                   -- where NB_DEPLOY
@@ -34,6 +40,12 @@ Usage:
     python run_notebook.py --environment test
     python run_notebook.py --environment production
     python run_notebook.py                              # deploys all three environments
+
+    --commit <sha>   optional; the commit that triggered this run (e.g. the pipeline's
+                      $(Build.SourceVersion)). Purely for traceability -- printed at the
+                      start of the run and included in every status line so a run (and
+                      whichever job attempt actually completed) can be traced back to the
+                      commit that was live in this environment when it ran.
 """
 import argparse
 import base64
@@ -55,6 +67,14 @@ PARAM_CELL_TAG = "parameters"
 PARAM_NAME = "target_environments_csv"
 MAX_DEPLOY_ATTEMPTS = 5
 
+# Transient-failure retry/backoff for individual HTTP calls (distinct from
+# MAX_DEPLOY_ATTEMPTS, which retries the whole trigger-and-poll cycle on a "Failed" job
+# status). Covers momentary connection errors plus 429 (rate limited) / 503 (service
+# unavailable) responses from Fabric's management-plane API.
+TRANSIENT_STATUS_CODES = (429, 503)
+HTTP_MAX_RETRIES = 4
+HTTP_RETRY_BACKOFF_SECONDS = 5
+
 
 def get_token() -> str:
     app = msal.ConfidentialClientApplication(
@@ -68,10 +88,38 @@ def get_token() -> str:
     return result["access_token"]
 
 
+def _request_with_retry(method: str, url: str, headers: dict, **kwargs) -> requests.Response:
+    """requests.<method> with a small retry/backoff for connection errors and transient
+    429/503 responses (honoring a Retry-After header when present). Returns the response
+    either way, including a non-2xx one once retries are exhausted, so callers can still
+    inspect status_code / call raise_for_status() exactly as if this were a plain
+    requests.get/post call."""
+    last_exc = None
+    resp = None
+    for attempt in range(1, HTTP_MAX_RETRIES + 1):
+        try:
+            resp = requests.request(method, url, headers=headers, **kwargs)
+        except requests.exceptions.RequestException as exc:
+            last_exc = exc
+            print(f"  {method} {url} attempt {attempt}/{HTTP_MAX_RETRIES} raised {exc!r}, retrying")
+            time.sleep(HTTP_RETRY_BACKOFF_SECONDS * attempt)
+            continue
+        if resp.status_code in TRANSIENT_STATUS_CODES and attempt < HTTP_MAX_RETRIES:
+            retry_after = resp.headers.get("Retry-After")
+            wait = float(retry_after) if retry_after else HTTP_RETRY_BACKOFF_SECONDS * attempt
+            print(f"  {method} {url} attempt {attempt}/{HTTP_MAX_RETRIES} -> {resp.status_code}, retrying in {wait:.0f}s")
+            time.sleep(wait)
+            continue
+        return resp
+    if resp is not None:
+        return resp
+    raise last_exc
+
+
 def poll_lro(location: str, headers: dict, poll_seconds: int) -> dict:
     while True:
         time.sleep(poll_seconds)
-        resp = requests.get(location, headers=headers)
+        resp = _request_with_retry("GET", location, headers)
         resp.raise_for_status()
         body = resp.json()
         status = body.get("status")
@@ -83,14 +131,15 @@ def poll_lro(location: str, headers: dict, poll_seconds: int) -> dict:
 
 def set_environment_parameter(workspace_id: str, notebook_id: str, headers: dict, environment: str) -> None:
     """Bake `environment` into the notebook's parameters-tagged cell via getDefinition -> updateDefinition."""
-    get_resp = requests.post(
+    get_resp = _request_with_retry(
+        "POST",
         f"{API_BASE}/workspaces/{workspace_id}/notebooks/{notebook_id}/getDefinition?format=ipynb",
-        headers=headers, json={},
+        headers, json={},
     )
     if get_resp.status_code != 202:
         sys.exit(f"getDefinition failed: {get_resp.status_code} {get_resp.text}")
-    lro = poll_lro(get_resp.headers["Location"], headers, LRO_POLL_SECONDS)
-    result = requests.get(f"{get_resp.headers['Location']}/result", headers=headers)
+    poll_lro(get_resp.headers["Location"], headers, LRO_POLL_SECONDS)
+    result = _request_with_retry("GET", f"{get_resp.headers['Location']}/result", headers)
     result.raise_for_status()
     parts = result.json()["definition"]["parts"]
     ipynb_part = next(p for p in parts if p["path"].endswith(".ipynb"))
@@ -112,9 +161,10 @@ def set_environment_parameter(workspace_id: str, notebook_id: str, headers: dict
     param_cell["source"] = new_src.splitlines(keepends=True)
 
     new_payload = base64.b64encode(json.dumps(nb, indent=1).encode()).decode()
-    update_resp = requests.post(
+    update_resp = _request_with_retry(
+        "POST",
         f"{API_BASE}/workspaces/{workspace_id}/notebooks/{notebook_id}/updateDefinition",
-        headers=headers,
+        headers,
         json={"definition": {"format": "ipynb", "parts": [
             {"path": "notebook-content.ipynb", "payload": new_payload, "payloadType": "InlineBase64"}
         ]}},
@@ -143,7 +193,7 @@ def run_deploy_job(workspace_id: str, notebook_id: str, headers: dict) -> tuple:
         if time.time() - start > TIMEOUT_SECONDS:
             return "TimedOut", None
         time.sleep(POLL_SECONDS)
-        poll = requests.get(status_url, headers=headers)
+        poll = _request_with_retry("GET", status_url, headers)
         poll.raise_for_status()
         body = poll.json()
         status = body.get("status")
@@ -158,22 +208,38 @@ def main() -> None:
         "--environment", default="",
         help="development | test | production (omit to deploy all three in one run)",
     )
+    parser.add_argument(
+        "--commit", default="",
+        help="commit SHA this run is deploying (e.g. the pipeline's $(Build.SourceVersion)). "
+             "Purely for traceability: printed at the start of the run and included in every "
+             "status line so a run is traceable back to a commit.",
+    )
     args = parser.parse_args()
 
     workspace_id = os.environ["FABRIC_WORKSPACE_ID"]
     notebook_id = os.environ["FABRIC_NOTEBOOK_ID"]
-    headers = {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
+    commit_label = args.commit or "(not provided)"
 
-    print(f"Setting target_environments_csv = '{args.environment or 'ALL'}' on NB_DEPLOY")
-    set_environment_parameter(workspace_id, notebook_id, headers, args.environment)
+    print(f"Commit:      {commit_label}")
+    print(f"Environment: {args.environment or 'ALL'}")
 
     for attempt in range(1, MAX_DEPLOY_ATTEMPTS + 1):
-        print(f"Starting NB_DEPLOY for environment(s): '{args.environment or 'ALL'}' (attempt {attempt}/{MAX_DEPLOY_ATTEMPTS})")
+        print(
+            f"\n[commit {commit_label}] Starting NB_DEPLOY for environment(s): "
+            f"'{args.environment or 'ALL'}' (attempt {attempt}/{MAX_DEPLOY_ATTEMPTS})"
+        )
         headers = {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
+
+        # Re-baked on every attempt (idempotent -- same "safe to re-run" shape as every other
+        # step here), so a transient failure while setting the parameter doesn't abort the
+        # whole run without ever reaching the MAX_DEPLOY_ATTEMPTS retry loop below.
+        print(f"Setting target_environments_csv = '{args.environment or 'ALL'}' on NB_DEPLOY")
+        set_environment_parameter(workspace_id, notebook_id, headers, args.environment)
+
         status, body = run_deploy_job(workspace_id, notebook_id, headers)
 
         if status == "Completed":
-            print("NB_DEPLOY run completed successfully.")
+            print(f"NB_DEPLOY run completed successfully. [commit {commit_label}]")
             return
 
         if attempt < MAX_DEPLOY_ATTEMPTS:
@@ -183,7 +249,10 @@ def main() -> None:
                 f"picks up wherever this attempt left off rather than starting over."
             )
         else:
-            sys.exit(f"NB_DEPLOY did not complete after {MAX_DEPLOY_ATTEMPTS} attempts. Last status '{status}': {body}")
+            sys.exit(
+                f"NB_DEPLOY did not complete after {MAX_DEPLOY_ATTEMPTS} attempts. "
+                f"Last status '{status}': {body} [commit {commit_label}]"
+            )
 
 
 if __name__ == "__main__":

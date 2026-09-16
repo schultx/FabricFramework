@@ -1,9 +1,21 @@
-import json, uuid
+import hashlib, itertools, json
+
+# Cell ids are derived deterministically (call order + source text) rather than uuid4() --
+# CI (Improvement-Roadmap.md, CI/CD #2) regenerates this notebook and diffs it against what's
+# committed to catch drift between build_nb_deploy.py and NB_DEPLOY.ipynb. A random id would
+# make every regeneration differ from the committed file even with zero logical change, so
+# that check would fail on every single run regardless of drift.
+_cell_seq = itertools.count()
+
+
+def _deterministic_id(src: str) -> str:
+    return hashlib.sha1(f"{next(_cell_seq)}:{src}".encode()).hexdigest()[:8]
+
 
 def code(src, tags=None):
     return {
         "cell_type": "code",
-        "id": uuid.uuid4().hex[:8],
+        "id": _deterministic_id(src),
         "execution_count": None,
         "outputs": [],
         "metadata": {
@@ -16,7 +28,7 @@ def code(src, tags=None):
 def md(src):
     return {
         "cell_type": "markdown",
-        "id": uuid.uuid4().hex[:8],
+        "id": _deterministic_id(src),
         "metadata": {},
         "source": src.splitlines(keepends=True),
     }
@@ -56,6 +68,7 @@ import io
 import json
 import struct
 import time
+import traceback
 import zipfile
 
 import requests
@@ -96,14 +109,28 @@ def api(method: str, path: str, **kwargs) -> requests.Response:
             print(f"    {method} {path} attempt {attempt}/{MAX_RETRIES} raised {exc!r}, retrying")
             time.sleep(5 * attempt)
             continue
-        if resp.status_code >= 500 and attempt < MAX_RETRIES:
-            print(f"    {method} {path} attempt {attempt}/{MAX_RETRIES} -> {resp.status_code}, retrying")
-            time.sleep(5 * attempt)
+        if (resp.status_code >= 500 or resp.status_code == 429) and attempt < MAX_RETRIES:
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after is not None:
+                try:
+                    delay = float(retry_after)
+                except ValueError:
+                    delay = 5 * attempt
+            else:
+                delay = 5 * attempt
+            print(f"    {method} {path} attempt {attempt}/{MAX_RETRIES} -> {resp.status_code}, retrying in {delay}s")
+            time.sleep(delay)
             continue
         if resp.status_code >= 400:
             raise RuntimeError(f"{method} {path} -> {resp.status_code}: {resp.text[:1000]}")
         return resp
     raise RuntimeError(f"{method} {path} failed after {MAX_RETRIES} attempts: {last_exc!r}")
+
+
+POLL_LRO_MAX_SECONDS = 2700  # 45 min -- comfortably under the outer CI job's ~1-hour timeout, so a
+                             # genuinely stuck operation raises a clear, named error here instead of
+                             # being indistinguishable from a live one until that outer timeout kills
+                             # the whole job with no signal.
 
 
 def poll_lro(resp: requests.Response) -> requests.Response:
@@ -112,17 +139,29 @@ def poll_lro(resp: requests.Response) -> requests.Response:
         return resp
     location = resp.headers["Location"]
     retry_after = int(resp.headers.get("Retry-After", "5"))
+    started = time.monotonic()
+    poll_count = 0
     while True:
+        elapsed = time.monotonic() - started
+        if elapsed > POLL_LRO_MAX_SECONDS:
+            raise TimeoutError(
+                f"poll_lro: operation at {location} did not reach a terminal status within "
+                f"{POLL_LRO_MAX_SECONDS}s ({poll_count} polls) -- aborting instead of looping forever."
+            )
         time.sleep(retry_after)
+        poll_count += 1
         poll = requests.get(location, headers=fabric_headers(), timeout=REQUEST_TIMEOUT)
         if poll.status_code == 200:
             body = poll.json()
+            print(f"    poll_lro: attempt {poll_count} ({elapsed:.0f}s elapsed) -> {body.get('status')}")
             if body.get("status") in ("Succeeded", "Completed"):
                 return poll
             if body.get("status") == "Failed":
                 raise RuntimeError(f"Long-running operation failed: {body}")
         elif poll.status_code not in (200, 202):
             poll.raise_for_status()
+        else:
+            print(f"    poll_lro: attempt {poll_count} ({elapsed:.0f}s elapsed) -> HTTP {poll.status_code} (pending)")
 """.rstrip() + "\n"))
 
 cells.append(md("## Download `src/` and `config/` from git\n\nSame branch/ref every environment deploys from -- no local drift between dev/test/prod."))
@@ -146,6 +185,54 @@ environments_cfg = yaml.safe_load(read_repo_text("config/environments.yaml"))
 lakehouses_cfg = yaml.safe_load(read_repo_text("config/lakehouses.yaml"))
 items_cfg = yaml.safe_load(read_repo_text("config/items.yaml"))
 metadata_sql = read_repo_text("config/metadata_schema.sql")
+
+# Known item.yaml `type` values -- one deploy branch exists for each (Phase 5/6/7 below).
+# An unrecognized value (a typo like "Notebok", wrong casing) would otherwise match none
+# of those branches and be silently dropped from the deploy with no error -- catch it here,
+# before any Fabric API call, instead of discovering it after "Deployment complete." prints.
+KNOWN_ITEM_TYPES = {"Notebook", "DataPipeline", "VariableLibrary"}
+
+
+def _validate_config(environments_cfg: dict, lakehouses_cfg: dict, items_cfg: dict) -> None:
+    \"\"\"Fail fast on a malformed config/*.yaml with a clear, config-path-specific error --
+    before any Fabric API call runs, so a missing/mistyped key can't throw a bare KeyError
+    mid-deploy after earlier environments in the same run have already been mutated.\"\"\"
+    errors = []
+
+    envs = environments_cfg.get("environments") or []
+    if not envs:
+        errors.append("config/environments.yaml: missing or empty top-level 'environments' list")
+    for i, env in enumerate(envs):
+        for key in ("name", "short", "capacity", "include_silver"):
+            if key not in env:
+                errors.append(f"config/environments.yaml: environments[{i}] (name={env.get('name', '?')!r}) missing required key '{key}'")
+
+    lhs = lakehouses_cfg.get("lakehouses") or []
+    if not lhs:
+        errors.append("config/lakehouses.yaml: missing or empty top-level 'lakehouses' list")
+    for i, lh in enumerate(lhs):
+        for key in ("name", "always"):
+            if key not in lh:
+                errors.append(f"config/lakehouses.yaml: lakehouses[{i}] missing required key '{key}'")
+
+    its = items_cfg.get("items") or []
+    if not its:
+        errors.append("config/items.yaml: missing or empty top-level 'items' list")
+    for i, item in enumerate(its):
+        for key in ("name", "type", "path"):
+            if key not in item:
+                errors.append(f"config/items.yaml: items[{i}] (name={item.get('name', '?')!r}) missing required key '{key}'")
+        if "type" in item and item["type"] not in KNOWN_ITEM_TYPES:
+            errors.append(
+                f"config/items.yaml: items[{i}] (name={item.get('name', '?')!r}) has unrecognized "
+                f"type {item['type']!r} -- must be one of {sorted(KNOWN_ITEM_TYPES)}"
+            )
+
+    if errors:
+        raise ValueError("Config validation failed before any Fabric API call:\\n" + "\\n".join(f"  - {e}" for e in errors))
+
+
+_validate_config(environments_cfg, lakehouses_cfg, items_cfg)
 
 environments = environments_cfg["environments"]
 if target_environments:
@@ -171,18 +258,36 @@ def get_or_create_workspace(display_name: str, capacity_id: str, tier: str) -> s
     matches = [w for w in resp.json()["value"] if w["displayName"] == display_name]
     if matches:
         workspace_id = matches[0]["id"]
+        current_capacity_id = matches[0].get("capacityId")
         print(f"  workspace exists: {display_name}")
     else:
         resp = api("POST", "/workspaces", json={"displayName": display_name})
         workspace_id = resp.json()["id"]
+        current_capacity_id = None
         print(f"  created workspace: {display_name}")
 
-    api("POST", f"/workspaces/{workspace_id}/assignToCapacity", json={"capacityId": capacity_id})
+    # Skip the reassignment call entirely once the workspace is already on the target
+    # capacity -- assignToCapacity has no reason to run unconditionally on every deploy,
+    # and this also sidesteps it entirely on a stale/renamed/paused capacity id once the
+    # workspace is already correctly placed.
+    if current_capacity_id != capacity_id:
+        api("POST", f"/workspaces/{workspace_id}/assignToCapacity", json={"capacityId": capacity_id})
+    else:
+        print(f"    already on target capacity: {display_name}")
 
     # Per-tier, not one flat list applied everywhere -- Ingestion holds source
     # Connections and the raw metadata catalog, so a principal only needed in Code
     # shouldn't automatically also reach it.
+    #
+    # roleAssignments is additive, not an upsert -- re-POSTing a (principal, role) pair
+    # the workspace already has is very likely to 4xx, so list what's already there first
+    # and only create what's missing, same check-then-create shape as every other
+    # get_or_create_* helper in this notebook.
+    resp = api("GET", f"/workspaces/{workspace_id}/roleAssignments")
+    existing_roles = {(ra["principal"]["id"], ra["role"]) for ra in resp.json()["value"]}
     for role in workspace_roles.get(tier, []):
+        if (role["principal_id"], role["role"]) in existing_roles:
+            continue
         api("POST", f"/workspaces/{workspace_id}/roleAssignments", json={
             "principal": {"id": role["principal_id"], "type": role["principal_type"]},
             "role": role["role"],
@@ -348,7 +453,24 @@ def run_metadata_schema(server: str, database: str, sql_text: str) -> None:
     SQL_COPT_SS_ACCESS_TOKEN = 1256
 
     conn_str = f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={server},1433;DATABASE={database};Encrypt=yes"
-    conn = pyodbc.connect(conn_str, attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct}, autocommit=True)
+
+    # Error 40613 ("database ... is not currently available, please retry") is the classic
+    # Azure SQL cold-start/warm-up condition -- hit on the first deploy attempt against a
+    # freshly created or long-idle SQL_METADATA_DATABASE in every environment tested. Always
+    # resolved on a plain retry, so self-heal here instead of needing a human to notice and
+    # re-run the whole job.
+    CONNECT_RETRIES = 3
+    conn = None
+    for attempt in range(1, CONNECT_RETRIES + 1):
+        try:
+            conn = pyodbc.connect(conn_str, attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct}, autocommit=True)
+            break
+        except pyodbc.Error as exc:
+            if attempt < CONNECT_RETRIES:
+                print(f"    connect to {database} attempt {attempt}/{CONNECT_RETRIES} raised {exc!r}, retrying in 10s")
+                time.sleep(10)
+            else:
+                raise
     try:
         cursor = conn.cursor()
         # split on a line whose only content (once stripped) is "GO" -- regardless of
@@ -393,7 +515,7 @@ cells.append(code(
 cells.append(md("## Deploy -- split across several small cells\n\nEach phase loops over every target environment, but stays in its own cell:\nheadless `RunNotebook` jobs on this runtime appear to enforce a per-statement\nexecution ceiling well under a minute, and a single cell that did every phase\nfor every environment (workspaces -> lakehouses -> SQL Database + schema ->\nnotebooks -> pipelines -> variable library -> demo data) tripped it partway\nthrough, killing the whole session before any exception could even be\ncaught. Splitting by phase keeps each cell's own work short regardless of how\nmany environments or items are involved. State that later phases need\n(workspace/lakehouse/notebook/pipeline ids) is carried in `env_state`, keyed\nby environment name."))
 
 cells.append(code(
-"""env_state = {env["name"]: {} for env in environments}
+"""env_state = {env["name"]: {"processed_item_names": set()} for env in environments}
 """))
 
 cells.append(md("### Phase 1 -- workspaces"))
@@ -402,15 +524,24 @@ cells.append(code(
 """for env in environments:
     print(f"\\n==================== {env['name']} ====================")
     st = env_state[env["name"]]
-    st["include_silver"] = env["include_silver"]
-    st["capacity_id"] = get_capacity_id(env["capacity"])
-    st["data_ws_name"] = f"Monza Data ({env['short']})"
-    st["ingestion_ws_name"] = f"Monza Ingestion ({env['short']})"
-    st["code_ws_name"] = f"Monza Code ({env['short']})"
+    try:
+        st["include_silver"] = env["include_silver"]
+        # Defaults to "Monza" (see config/environments.yaml) so a config predating this
+        # field still deploys under the original name -- same backward-compat shape as
+        # metadata_connection_guid's env.get(...) below.
+        st["framework_name"] = env.get("framework_name", "Monza")
+        st["capacity_id"] = get_capacity_id(env["capacity"])
+        st["data_ws_name"] = f"{st['framework_name']} Data ({env['short']})"
+        st["ingestion_ws_name"] = f"{st['framework_name']} Ingestion ({env['short']})"
+        st["code_ws_name"] = f"{st['framework_name']} Code ({env['short']})"
 
-    st["data_ws_id"] = get_or_create_workspace(st["data_ws_name"], st["capacity_id"], "data")
-    st["ingestion_ws_id"] = get_or_create_workspace(st["ingestion_ws_name"], st["capacity_id"], "ingestion")
-    st["code_ws_id"] = get_or_create_workspace(st["code_ws_name"], st["capacity_id"], "code")
+        st["data_ws_id"] = get_or_create_workspace(st["data_ws_name"], st["capacity_id"], "data")
+        st["ingestion_ws_id"] = get_or_create_workspace(st["ingestion_ws_name"], st["capacity_id"], "ingestion")
+        st["code_ws_id"] = get_or_create_workspace(st["code_ws_name"], st["capacity_id"], "code")
+    except Exception:
+        print(f"    ERROR: Phase 1 (workspaces) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 """))
 
 cells.append(md("### Phase 2 -- lakehouses"))
@@ -419,10 +550,15 @@ cells.append(code(
 """for env in environments:
     st = env_state[env["name"]]
     print(f"-- lakehouses ({st['data_ws_name']})")
-    st["lakehouse_ids"] = {}
-    for lh in lakehouses_cfg["lakehouses"]:
-        if lh["always"] or st["include_silver"]:
-            st["lakehouse_ids"][lh["name"]] = get_or_create_lakehouse(st["data_ws_id"], lh["name"])
+    try:
+        st["lakehouse_ids"] = {}
+        for lh in lakehouses_cfg["lakehouses"]:
+            if lh["always"] or st["include_silver"]:
+                st["lakehouse_ids"][lh["name"]] = get_or_create_lakehouse(st["data_ws_id"], lh["name"])
+    except Exception:
+        print(f"    ERROR: Phase 2 (lakehouses) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 """))
 
 cells.append(md("### Phase 3 -- metadata catalog SQL Database + schema"))
@@ -431,10 +567,15 @@ cells.append(code(
 """for env in environments:
     st = env_state[env["name"]]
     print(f"-- metadata catalog ({st['ingestion_ws_name']})")
-    server, database = get_or_create_sql_database(st["ingestion_ws_id"], "SQL_METADATA_DATABASE")
-    run_metadata_schema(server, database, metadata_sql)
-    st["sql_server"] = server
-    st["sql_database"] = database
+    try:
+        server, database = get_or_create_sql_database(st["ingestion_ws_id"], "SQL_METADATA_DATABASE")
+        run_metadata_schema(server, database, metadata_sql)
+        st["sql_server"] = server
+        st["sql_database"] = database
+    except Exception:
+        print(f"    ERROR: Phase 3 (metadata catalog) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 """))
 
 cells.append(md("### Phase 4 -- workspace folders\n\nA small, fixed structure per workspace -- not everything needs a folder\n(`VAR_MONZA`, the lakehouses, and `SQL_METADATA_DATABASE` all stay at\nworkspace root). Created once per environment and reused by every\n`get_or_create_item` call in the phases below."))
@@ -443,13 +584,18 @@ cells.append(code(
 """for env in environments:
     st = env_state[env["name"]]
     print(f"-- folders ({st['code_ws_name']} / {st['ingestion_ws_name']})")
-    st["code_folder_ids"] = {
-        "Notebooks": get_or_create_folder(st["code_ws_id"], "Notebooks"),
-        "Pipelines": get_or_create_folder(st["code_ws_id"], "Pipelines"),
-    }
-    st["ingestion_folder_ids"] = {
-        "Pipelines": get_or_create_folder(st["ingestion_ws_id"], "Pipelines"),
-    }
+    try:
+        st["code_folder_ids"] = {
+            "Notebooks": get_or_create_folder(st["code_ws_id"], "Notebooks"),
+            "Pipelines": get_or_create_folder(st["code_ws_id"], "Pipelines"),
+        }
+        st["ingestion_folder_ids"] = {
+            "Pipelines": get_or_create_folder(st["ingestion_ws_id"], "Pipelines"),
+        }
+    except Exception:
+        print(f"    ERROR: Phase 4 (folders) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 
 
 def target_workspace_id(st: dict, item: dict) -> str:
@@ -482,27 +628,32 @@ cells.append(code(
 """for env in environments:
     st = env_state[env["name"]]
     print(f"-- notebooks ({st['code_ws_name']})")
+    try:
+        # Binds each loader notebook's *default* lakehouse to Bronze -- that's what turns on
+        # OneLake Spark Catalog for the whole Data workspace, so 3-part names (Landing.x.y,
+        # Gold.x.y, etc.) resolve inside these notebooks without a separate binding per lakehouse.
+        # A no-op substitution for notebooks that don't reference these placeholders at all.
+        notebook_substitutions = {
+            "__BRONZE_LAKEHOUSE_ID__": st["lakehouse_ids"]["Bronze"],
+            "__DATA_WORKSPACE_ID__": st["data_ws_id"],
+        }
 
-    # Binds each loader notebook's *default* lakehouse to Bronze -- that's what turns on
-    # OneLake Spark Catalog for the whole Data workspace, so 3-part names (Landing.x.y,
-    # Gold.x.y, etc.) resolve inside these notebooks without a separate binding per lakehouse.
-    # A no-op substitution for notebooks that don't reference these placeholders at all.
-    notebook_substitutions = {
-        "__BRONZE_LAKEHOUSE_ID__": st["lakehouse_ids"]["Bronze"],
-        "__DATA_WORKSPACE_ID__": st["data_ws_id"],
-    }
-
-    st["notebook_ids"] = {}
-    for item in items_cfg["items"]:
-        if item.get("requires_silver") and not st["include_silver"]:
-            continue
-        if item["type"] != "Notebook":
-            continue
-        workspace = item.get("workspace", "Code")
-        st["notebook_ids"][item["name"]] = get_or_create_item(
-            target_workspace_id(st, item), "Notebook", item["name"], f"src/{item['path']}", notebook_substitutions,
-            folder_id=folder_id_for_item(st, "Notebook", workspace),
-        )
+        st["notebook_ids"] = {}
+        for item in items_cfg["items"]:
+            if item.get("requires_silver") and not st["include_silver"]:
+                continue
+            if item["type"] != "Notebook":
+                continue
+            workspace = item.get("workspace", "Code")
+            st["notebook_ids"][item["name"]] = get_or_create_item(
+                target_workspace_id(st, item), "Notebook", item["name"], f"src/{item['path']}", notebook_substitutions,
+                folder_id=folder_id_for_item(st, "Notebook", workspace),
+            )
+            st["processed_item_names"].add(item["name"])
+    except Exception:
+        print(f"    ERROR: Phase 5 (notebooks) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 """))
 
 cells.append(md("### Phase 6 -- pipelines"))
@@ -511,91 +662,98 @@ cells.append(code(
 """for env in environments:
     st = env_state[env["name"]]
     print(f"-- pipelines ({st['code_ws_name']} / {st['ingestion_ws_name']})")
-    notebook_ids = st["notebook_ids"]
+    try:
+        notebook_ids = st["notebook_ids"]
 
-    # This substitutions dict is used for every DataPipeline's own content. Every PL_INGEST_*
-    # pipeline's Lookup activity needs __METADATA_CONNECTION_GUID__ -- the one Connection that
-    # can't live in ingestion.Connection itself (see config/environments.yaml's comment on
-    # metadata_connection_guid). Left "" until the one-time manual bootstrap (DEPLOYMENT.md) is
-    # done for this environment -- deploy anyway (tolerating incomplete-but-recoverable state,
-    # same as elsewhere in this notebook) rather than failing the whole run over it.
-    metadata_connection_guid = env.get("metadata_connection_guid", "")
-    if not metadata_connection_guid:
-        print(f"    WARNING: metadata_connection_guid is not set for '{env['name']}' -- "
-              f"PL_INGEST_* pipelines will deploy, but their Lookup activities won't resolve "
-              f"a Connection until config/environments.yaml is updated and this is redeployed.")
+        # This substitutions dict is used for every DataPipeline's own content. Every PL_INGEST_*
+        # pipeline's Lookup activity needs __METADATA_CONNECTION_GUID__ -- the one Connection that
+        # can't live in ingestion.Connection itself (see config/environments.yaml's comment on
+        # metadata_connection_guid). Left "" until the one-time manual bootstrap (DEPLOYMENT.md) is
+        # done for this environment -- deploy anyway (tolerating incomplete-but-recoverable state,
+        # same as elsewhere in this notebook) rather than failing the whole run over it.
+        metadata_connection_guid = env.get("metadata_connection_guid", "")
+        if not metadata_connection_guid:
+            print(f"    WARNING: metadata_connection_guid is not set for '{env['name']}' -- "
+                  f"PL_INGEST_* pipelines will deploy, but their Lookup activities won't resolve "
+                  f"a Connection until config/environments.yaml is updated and this is redeployed.")
 
-    pipeline_substitutions = {
-        "__NB_LOAD_BRONZE_ID__": notebook_ids["NB_LOAD_BRONZE"],
-        "__NB_LOAD_GOLD_ID__": notebook_ids["NB_LOAD_GOLD"],
-        "__METADATA_CONNECTION_GUID__": metadata_connection_guid,
-        "__DATA_WORKSPACE_ID__": st["data_ws_id"],
-        "__LANDING_LAKEHOUSE_ID__": st["lakehouse_ids"]["Landing"],
-        "__CODE_WORKSPACE_ID__": st["code_ws_id"],
-    }
-    if st["include_silver"]:
-        pipeline_substitutions["__NB_LOAD_SILVER_ID__"] = notebook_ids["NB_LOAD_SILVER"]
+        pipeline_substitutions = {
+            "__NB_LOAD_BRONZE_ID__": notebook_ids["NB_LOAD_BRONZE"],
+            "__NB_LOAD_GOLD_ID__": notebook_ids["NB_LOAD_GOLD"],
+            "__METADATA_CONNECTION_GUID__": metadata_connection_guid,
+            "__DATA_WORKSPACE_ID__": st["data_ws_id"],
+            "__LANDING_LAKEHOUSE_ID__": st["lakehouse_ids"]["Landing"],
+            "__CODE_WORKSPACE_ID__": st["code_ws_id"],
+        }
+        if st["include_silver"]:
+            pipeline_substitutions["__NB_LOAD_SILVER_ID__"] = notebook_ids["NB_LOAD_SILVER"]
 
-    st["pipeline_ids"] = {}
-    for item in items_cfg["items"]:
-        if item.get("requires_silver") and not st["include_silver"]:
-            continue
-        if item["type"] != "DataPipeline" or item["name"] == "PL_RUN_ALL":
-            continue
-        workspace = item.get("workspace", "Code")
-        st["pipeline_ids"][item["name"]] = get_or_create_item(
-            target_workspace_id(st, item), "DataPipeline", item["name"], f"src/{item['path']}", pipeline_substitutions,
-            folder_id=folder_id_for_item(st, "DataPipeline", workspace),
+        st["pipeline_ids"] = {}
+        for item in items_cfg["items"]:
+            if item.get("requires_silver") and not st["include_silver"]:
+                continue
+            if item["type"] != "DataPipeline" or item["name"] == "PL_RUN_ALL":
+                continue
+            workspace = item.get("workspace", "Code")
+            st["pipeline_ids"][item["name"]] = get_or_create_item(
+                target_workspace_id(st, item), "DataPipeline", item["name"], f"src/{item['path']}", pipeline_substitutions,
+                folder_id=folder_id_for_item(st, "DataPipeline", workspace),
+            )
+            st["processed_item_names"].add(item["name"])
+
+        # PL_RUN_ALL itself always deploys into Code, and reaches every PL_INGEST_* pipeline (in
+        # Ingestion) via NB_RUN_REMOTE_PIPELINE's cross-workspace TridentNotebook bridge instead of
+        # a same-workspace ExecutePipeline reference -- see the EP_INGEST_* activities in
+        # PL_RUN_ALL.DataPipeline/pipeline-content.json.
+        run_all_substitutions = {
+            "__PL_INGEST_SQL_ID__": st["pipeline_ids"]["PL_INGEST_SQL"],
+            "__PL_INGEST_FILE_ID__": st["pipeline_ids"]["PL_INGEST_FILE"],
+            "__PL_INGEST_SQLMI_ID__": st["pipeline_ids"]["PL_INGEST_SQLMI"],
+            "__PL_INGEST_ORACLE_ID__": st["pipeline_ids"]["PL_INGEST_ORACLE"],
+            "__PL_INGEST_SFTP_ID__": st["pipeline_ids"]["PL_INGEST_SFTP"],
+            "__PL_INGEST_FTP_ID__": st["pipeline_ids"]["PL_INGEST_FTP"],
+            "__PL_INGEST_ONELAKETABLE_ID__": st["pipeline_ids"]["PL_INGEST_ONELAKETABLE"],
+            "__PL_INGEST_ONELAKEFILE_ID__": st["pipeline_ids"]["PL_INGEST_ONELAKEFILE"],
+            "__PL_LOAD_BRONZE_ID__": st["pipeline_ids"]["PL_LOAD_BRONZE"],
+            "__PL_LOAD_GOLD_ID__": st["pipeline_ids"]["PL_LOAD_GOLD"],
+            "__NB_RUN_REMOTE_PIPELINE_ID__": notebook_ids["NB_RUN_REMOTE_PIPELINE"],
+            "__INGESTION_WORKSPACE_ID__": st["ingestion_ws_id"],
+            "__CODE_WORKSPACE_ID__": st["code_ws_id"],
+        }
+
+        # config/items.yaml's committed PL_RUN_ALL.DataPipeline is the 4-stage form (no
+        # Silver). For an include_silver environment, splice in a 5th ExecutePipeline
+        # activity here rather than maintaining a second committed pipeline file --
+        # insert EP_LOAD_SILVER between Bronze and Gold and repoint Gold's dependsOn.
+        run_all_override = None
+        if st["include_silver"]:
+            pl_run_all = json.loads(read_repo_text("src/PL_RUN_ALL.DataPipeline/pipeline-content.json"))
+            activities = pl_run_all["properties"]["activities"]
+            gold_idx = next(i for i, a in enumerate(activities) if a["name"] == "EP_LOAD_GOLD")
+            activities.insert(gold_idx, {
+                "name": "EP_LOAD_SILVER",
+                "type": "ExecutePipeline",
+                "dependsOn": [{"activity": "EP_LOAD_BRONZE", "dependencyConditions": ["Succeeded"]}],
+                "policy": {"retry": 2, "retryIntervalInSeconds": 30, "secureInput": False, "secureOutput": False},
+                "typeProperties": {
+                    "pipeline": {"referenceName": st["pipeline_ids"]["PL_LOAD_SILVER"], "type": "PipelineReference"},
+                    "waitOnCompletion": True,
+                    "parameters": {},
+                },
+            })
+            activities[gold_idx + 1]["dependsOn"] = [{"activity": "EP_LOAD_SILVER", "dependencyConditions": ["Succeeded"]}]
+            run_all_override = {"pipeline-content.json": json.dumps(pl_run_all, indent=2).encode("utf-8")}
+
+        get_or_create_item(
+            st["code_ws_id"], "DataPipeline", "PL_RUN_ALL", "src/PL_RUN_ALL.DataPipeline",
+            run_all_substitutions, content_override=run_all_override,
+            folder_id=st["code_folder_ids"]["Pipelines"],
         )
-
-    # PL_RUN_ALL itself always deploys into Code, and reaches every PL_INGEST_* pipeline (in
-    # Ingestion) via NB_RUN_REMOTE_PIPELINE's cross-workspace TridentNotebook bridge instead of
-    # a same-workspace ExecutePipeline reference -- see the EP_INGEST_* activities in
-    # PL_RUN_ALL.DataPipeline/pipeline-content.json.
-    run_all_substitutions = {
-        "__PL_INGEST_SQL_ID__": st["pipeline_ids"]["PL_INGEST_SQL"],
-        "__PL_INGEST_FILE_ID__": st["pipeline_ids"]["PL_INGEST_FILE"],
-        "__PL_INGEST_SQLMI_ID__": st["pipeline_ids"]["PL_INGEST_SQLMI"],
-        "__PL_INGEST_ORACLE_ID__": st["pipeline_ids"]["PL_INGEST_ORACLE"],
-        "__PL_INGEST_SFTP_ID__": st["pipeline_ids"]["PL_INGEST_SFTP"],
-        "__PL_INGEST_FTP_ID__": st["pipeline_ids"]["PL_INGEST_FTP"],
-        "__PL_INGEST_ONELAKETABLE_ID__": st["pipeline_ids"]["PL_INGEST_ONELAKETABLE"],
-        "__PL_INGEST_ONELAKEFILE_ID__": st["pipeline_ids"]["PL_INGEST_ONELAKEFILE"],
-        "__PL_LOAD_BRONZE_ID__": st["pipeline_ids"]["PL_LOAD_BRONZE"],
-        "__PL_LOAD_GOLD_ID__": st["pipeline_ids"]["PL_LOAD_GOLD"],
-        "__NB_RUN_REMOTE_PIPELINE_ID__": notebook_ids["NB_RUN_REMOTE_PIPELINE"],
-        "__INGESTION_WORKSPACE_ID__": st["ingestion_ws_id"],
-        "__CODE_WORKSPACE_ID__": st["code_ws_id"],
-    }
-
-    # config/items.yaml's committed PL_RUN_ALL.DataPipeline is the 4-stage form (no
-    # Silver). For an include_silver environment, splice in a 5th ExecutePipeline
-    # activity here rather than maintaining a second committed pipeline file --
-    # insert EP_LOAD_SILVER between Bronze and Gold and repoint Gold's dependsOn.
-    run_all_override = None
-    if st["include_silver"]:
-        pl_run_all = json.loads(read_repo_text("src/PL_RUN_ALL.DataPipeline/pipeline-content.json"))
-        activities = pl_run_all["properties"]["activities"]
-        gold_idx = next(i for i, a in enumerate(activities) if a["name"] == "EP_LOAD_GOLD")
-        activities.insert(gold_idx, {
-            "name": "EP_LOAD_SILVER",
-            "type": "ExecutePipeline",
-            "dependsOn": [{"activity": "EP_LOAD_BRONZE", "dependencyConditions": ["Succeeded"]}],
-            "policy": {"retry": 2, "retryIntervalInSeconds": 30, "secureInput": False, "secureOutput": False},
-            "typeProperties": {
-                "pipeline": {"referenceName": st["pipeline_ids"]["PL_LOAD_SILVER"], "type": "PipelineReference"},
-                "waitOnCompletion": True,
-                "parameters": {},
-            },
-        })
-        activities[gold_idx + 1]["dependsOn"] = [{"activity": "EP_LOAD_SILVER", "dependencyConditions": ["Succeeded"]}]
-        run_all_override = {"pipeline-content.json": json.dumps(pl_run_all, indent=2).encode("utf-8")}
-
-    get_or_create_item(
-        st["code_ws_id"], "DataPipeline", "PL_RUN_ALL", "src/PL_RUN_ALL.DataPipeline",
-        run_all_substitutions, content_override=run_all_override,
-        folder_id=st["code_folder_ids"]["Pipelines"],
-    )
+        st["processed_item_names"].add("PL_RUN_ALL")
+    except Exception:
+        print(f"    ERROR: Phase 6 (pipelines) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 """))
 
 cells.append(md("### Phase 7 -- variable library + demo data seed"))
@@ -603,15 +761,21 @@ cells.append(md("### Phase 7 -- variable library + demo data seed"))
 cells.append(code(
 """for env in environments:
     st = env_state[env["name"]]
-    for item in items_cfg["items"]:
-        if item["type"] == "VariableLibrary":
-            get_or_create_item(st["code_ws_id"], "VariableLibrary", item["name"], f"src/{item['path']}", substitutions={})
+    try:
+        for item in items_cfg["items"]:
+            if item["type"] == "VariableLibrary":
+                get_or_create_item(st["code_ws_id"], "VariableLibrary", item["name"], f"src/{item['path']}", substitutions={})
+                st["processed_item_names"].add(item["name"])
 
-    print(f"-- seeding demo data ({st['data_ws_name']}/Landing)")
-    upload_file_to_onelake(
-        st["data_ws_id"], st["lakehouse_ids"]["Landing"], "customer/customer.csv", read_repo_file("demodata/customer.csv")
-    )
-    print(f"Done: {env['name']}")
+        print(f"-- seeding demo data ({st['data_ws_name']}/Landing)")
+        upload_file_to_onelake(
+            st["data_ws_id"], st["lakehouse_ids"]["Landing"], "customer/customer.csv", read_repo_file("demodata/customer.csv")
+        )
+        print(f"Done: {env['name']}")
+    except Exception:
+        print(f"    ERROR: Phase 7 (variable library / demo data) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 """))
 
 cells.append(md("## Register demo Connection/Database/Table + summary\n\nOne-time metadata rows so `NB_LOAD_BRONZE` / `dim_customer` / `fact_signup`\nhave something to load on first run (the `ingestion.*` DDL creates empty\ntables only). A single active `ingestion.Table` row drives a table's entire\nSource -> Landing -> Bronze flow now, so one `Connection` + one `Database` +\none `Table` row (File-type, `LoadType = 'Full'`) is all it takes.\n\nThe demo `Connection` row is deliberately `IsActive = 0` --\n`demodata/customer.csv` is uploaded directly to Landing above (there's no\nreal Connection object behind that `NEWID()` GUID), so `PL_INGEST_FILE`'s own\nLookup (`ingestion.vw_ActiveIngestTables`, which filters on\n`c.[IsActive] = 1` in its own `WHERE` clause -- see `config/metadata_schema.sql`)\ncorrectly skips it rather than failing trying to Copy through a Connection\nthat doesn't exist. `NB_LOAD_BRONZE` doesn't filter on `Connection.IsActive`\nat all, so it still picks up the row fine.\n\nSilver no longer has a metadata table of its own -- for an `include_silver`\nenvironment, `sil_customer.Notebook` (a hand-written, per-table notebook,\nsame shape as `dim_customer`) is deployed automatically via `config/items.yaml`\nin Phase 5 above and %run-chained from `NB_LOAD_SILVER`. No seed row needed\nto exercise `NB_LOAD_SILVER`/`PL_LOAD_SILVER` end to end -- Gold still reads\nBronze directly here, since nothing in this demo actually reuses the Silver\nshape (the real rule this framework follows throughout)."))
@@ -619,21 +783,40 @@ cells.append(md("## Register demo Connection/Database/Table + summary\n\nOne-tim
 cells.append(code(
 """for env in environments:
     st = env_state[env["name"]]
-    seed_sql = \"\"\"
-    IF NOT EXISTS (SELECT 1 FROM [ingestion].[Connection] WHERE [Name] = 'demo_customer_source')
-    INSERT INTO [ingestion].[Connection] ([Name], [ConnectionType], [ConnectionGuid], [IsActive]) VALUES ('demo_customer_source', 'File', NEWID(), 0)
-    GO
-    IF NOT EXISTS (SELECT 1 FROM [ingestion].[Database] WHERE [Name] = 'demo')
-    INSERT INTO [ingestion].[Database] ([ConnectionId], [Name])
-    SELECT [ConnectionId], 'demo' FROM [ingestion].[Connection] WHERE [Name] = 'demo_customer_source'
-    GO
-    IF NOT EXISTS (SELECT 1 FROM [ingestion].[Table] WHERE [BronzeName] = 'customer' AND [SourceObject] = 'customer.csv')
-    INSERT INTO [ingestion].[Table] ([DatabaseId], [SourceObject], [FilePath], [FileType], [BronzeSchema], [BronzeName], [PrimaryKeys], [LoadType])
-    SELECT [DatabaseId], 'customer.csv', 'customer', 'csv', 'dbo', 'customer', 'CustomerId', 'Full' FROM [ingestion].[Database] WHERE [Name] = 'demo'
-    GO
-    \"\"\"
-    run_metadata_schema(st["sql_server"], st["sql_database"], seed_sql)
-    print(f"Seeded demo Connection/Database/Table for {env['name']}")
+    try:
+        seed_sql = \"\"\"
+        IF NOT EXISTS (SELECT 1 FROM [ingestion].[Connection] WHERE [Name] = 'demo_customer_source')
+        INSERT INTO [ingestion].[Connection] ([Name], [ConnectionType], [ConnectionGuid], [IsActive]) VALUES ('demo_customer_source', 'File', NEWID(), 0)
+        GO
+        IF NOT EXISTS (SELECT 1 FROM [ingestion].[Database] WHERE [Name] = 'demo')
+        INSERT INTO [ingestion].[Database] ([ConnectionId], [Name])
+        SELECT [ConnectionId], 'demo' FROM [ingestion].[Connection] WHERE [Name] = 'demo_customer_source'
+        GO
+        IF NOT EXISTS (SELECT 1 FROM [ingestion].[Table] WHERE [BronzeName] = 'customer' AND [SourceObject] = 'customer.csv')
+        INSERT INTO [ingestion].[Table] ([DatabaseId], [SourceObject], [FilePath], [FileType], [BronzeSchema], [BronzeName], [PrimaryKeys], [LoadType])
+        SELECT [DatabaseId], 'customer.csv', 'customer', 'csv', 'dbo', 'customer', 'CustomerId', 'Full' FROM [ingestion].[Database] WHERE [Name] = 'demo'
+        GO
+        \"\"\"
+        run_metadata_schema(st["sql_server"], st["sql_database"], seed_sql)
+        print(f"Seeded demo Connection/Database/Table for {env['name']}")
+
+        # Confirm every applicable items.yaml entry was actually claimed by Phase 5/6/7 above --
+        # an unrecognized/mistyped 'type' would already have been caught by _validate_config, but
+        # this catches any other way an entry could fall through every phase's filter unnoticed
+        # (e.g. a future phase filter bug) before this reports success.
+        expected_item_names = {
+            i["name"] for i in items_cfg["items"] if not i.get("requires_silver") or st["include_silver"]
+        }
+        missing_item_names = expected_item_names - st["processed_item_names"]
+        if missing_item_names:
+            raise RuntimeError(
+                f"Deploy for '{env['name']}' never processed these items.yaml entries: "
+                f"{sorted(missing_item_names)}"
+            )
+    except Exception:
+        print(f"    ERROR: final phase (demo seed / item-coverage check) failed for environment '{env['name']}':")
+        traceback.print_exc()
+        raise
 
 print("\\nDeployment complete for:", [e["name"] for e in environments])
 """))

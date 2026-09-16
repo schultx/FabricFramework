@@ -40,6 +40,14 @@ sidesteps the bug at the root instead of working around it.)
    `ingestion.Table` row (a File-type, full-load ingestion), so `PL_RUN_ALL`
    has something to load on a first run
 
+`config/environments.yaml`'s `workspace_roles` (the Entra principals granted
+access per workspace tier — `data` / `ingestion` / `code`) is applied on
+**every** deploy, not just the first one — `get_or_create_workspace` lists
+each workspace's current role assignments first and only grants the ones not
+already present, so filling in `workspace_roles` (e.g. before handoff to a
+client) and redeploying is safe: already-granted principals are skipped, not
+re-POSTed.
+
 ### Workspace folders
 
 The Code workspace gets `Notebooks/` (every loader + Gold/Silver notebook,

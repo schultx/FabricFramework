@@ -281,22 +281,167 @@ def _generate_surrogate_key(
     table_prefix: str,
     new_table: bool
 ) -> DataFrame:
-    """Generate and prepend a surrogate key column to the DataFrame."""
+    """
+    Generate and prepend a surrogate key column to the DataFrame.
+
+    Uses a deterministic dense row_number() sequence rather than
+    monotonically_increasing_id() -- that function only produces small,
+    contiguous-looking values on single-partition demo data; at real client
+    volumes (multiple files/partitions) its values are large, non-contiguous,
+    and partition-dependent, risking a silent collision if a downstream layer
+    narrows the key to int32. Ordered by this DataFrame's own '_key'-suffixed
+    business-key column(s) when present (the same convention
+    _identify_column_types() falls back to), since this function isn't told
+    the caller's resolved primary_keys list; falls back to ordering by the
+    full row when no such column exists.
+    """
     sk_column_name = f"{table_name}{SK_SUFFIX}"
 
     if sk_column_name in df.columns:
         return df
 
+    order_columns = [
+        col for col in df.columns
+        if col.endswith(BK_SUFFIX) and col not in [CREATED_COL, MODIFIED_COL]
+    ]
+    if not order_columns:
+        order_columns = df.columns
+    row_order = Window.orderBy(*[F.col(col) for col in order_columns])
+
     if new_table:
-        df = df.withColumn(sk_column_name, F.monotonically_increasing_id() + 1)
+        df = df.withColumn(sk_column_name, F.row_number().over(row_order))
     else:
         full_table_name = _full_table_name(lakehouse_name, schema_name, table_prefix, table_name)
         existing_df = spark.table(full_table_name)
         max_sk = existing_df.agg(F.max(sk_column_name)).collect()[0][0] or 0
-        df = df.withColumn(sk_column_name, F.monotonically_increasing_id() + max_sk + 1)
+        df = df.withColumn(sk_column_name, F.row_number().over(row_order) + max_sk)
 
     other_columns = [col for col in df.columns if col != sk_column_name]
     return df.select([sk_column_name] + other_columns)
+
+
+def _preserve_surrogate_keys_scd1(
+    df: DataFrame,
+    full_table_name: str,
+    primary_keys: List[str],
+    sk_column_name: str,
+    lakehouse_name: str,
+    schema_name: str,
+    table_name: str,
+    table_prefix: str
+) -> DataFrame:
+    """
+    For write_dimension_type1(full_refresh=True) against an already-existing
+    table: left-join df onto the existing table by business key so each
+    previously-existing member keeps its surrogate key, and mint a new key
+    (via _generate_surrogate_key's existing-table path) only for rows with no
+    match in the existing table -- genuinely new members. Any previously
+    carried-over Unknown row (surrogate key == UNKNOWN_KEY_VALUE) is excluded
+    from the existing lookup so the caller's own fresh _create_unknown_record()
+    call doesn't end up duplicating it.
+    """
+    existing_lookup = (
+        spark.table(full_table_name)
+        .filter(F.col(sk_column_name) != UNKNOWN_KEY_VALUE)
+        .select(primary_keys + [sk_column_name])
+    )
+
+    df = df.join(existing_lookup, on=primary_keys, how="left")
+    existing_members = df.filter(F.col(sk_column_name).isNotNull())
+    new_members = df.filter(F.col(sk_column_name).isNull()).drop(sk_column_name)
+
+    if new_members.take(1):
+        new_members = _generate_surrogate_key(
+            new_members, lakehouse_name, schema_name, table_name, table_prefix, new_table=False
+        )
+        result = existing_members.select(new_members.columns).unionByName(new_members)
+    else:
+        result = existing_members
+
+    other_columns = [col for col in result.columns if col != sk_column_name]
+    return result.select([sk_column_name] + other_columns)
+
+
+def _full_refresh_scd2_with_history(
+    df: DataFrame,
+    full_table_name: str,
+    primary_keys: List[str],
+    attribute_columns: List[str],
+    sk_column_name: str,
+    valid_from_column: Optional[str],
+    lakehouse_name: str,
+    schema_name: str,
+    table_name: str,
+    table_prefix: str
+) -> DataFrame:
+    """
+    For write_dimension_type2(full_refresh=True) against an already-existing
+    table: rebuild the dimension's full row set in memory, preserving history
+    and existing surrogate keys instead of discarding them the way a blind
+    overwrite would.
+
+    Mirrors the ordinary (non-full_refresh) merge branch row-for-row: a current
+    row whose business key reappears in df with unchanged attributes is left
+    exactly as-is; one whose attributes changed is closed out (valid_to /
+    is_current / modified) the same way the live MERGE does; a business key not
+    present in df at all is left untouched; and only genuinely new-or-changed
+    members get a freshly minted surrogate key via _generate_surrogate_key,
+    reading the same existing table the live merge path reads for max_sk.
+    Already-historical rows (is_current = false) always pass through unchanged.
+    Returns the full, ready-to-overwrite DataFrame -- the caller writes it.
+    """
+    existing_df = spark.table(full_table_name)
+    # Drop any previously-added Unknown row (sk == UNKNOWN_KEY_VALUE) -- the
+    # caller re-adds a fresh one via _create_unknown_record() when requested,
+    # and it must never be matched against or duplicated by the logic below.
+    existing_df = existing_df.filter(F.col(sk_column_name) != UNKNOWN_KEY_VALUE)
+
+    existing_noncurrent = existing_df.filter(F.col(IS_CURRENT_COL) == False)
+    existing_current = existing_df.filter(F.col(IS_CURRENT_COL) == True)
+
+    src_cols = [F.col(attr).alias(f"__src_{attr}") for attr in attribute_columns]
+    has_valid_from_source = bool(valid_from_column) and valid_from_column in df.columns
+    if has_valid_from_source:
+        src_cols.append(F.col(valid_from_column).alias("__src_valid_to"))
+    incoming = df.select(*(primary_keys + src_cols + [F.lit(True).alias("__matched")]))
+
+    joined = existing_current.join(incoming, on=primary_keys, how="left")
+
+    change_expr = F.lit(False)
+    for attr in attribute_columns:
+        src_attr = F.col(f"__src_{attr}")
+        change_expr = change_expr | (
+            (F.col(attr) != src_attr)
+            | (F.col(attr).isNull() & src_attr.isNotNull())
+            | (F.col(attr).isNotNull() & src_attr.isNull())
+        )
+    should_close = F.col("__matched").isNotNull() & change_expr
+    new_valid_to = F.col("__src_valid_to") if has_valid_from_source else F.current_date()
+
+    updated_current = (
+        joined
+        .withColumn(VALID_TO_COL, F.when(should_close, new_valid_to).otherwise(F.col(VALID_TO_COL)))
+        .withColumn(IS_CURRENT_COL, F.when(should_close, F.lit(False)).otherwise(F.col(IS_CURRENT_COL)))
+        .withColumn(MODIFIED_COL, F.when(should_close, F.current_timestamp()).otherwise(F.col(MODIFIED_COL)))
+        .select(existing_current.columns)
+    )
+
+    current_target_after = updated_current.filter(F.col(IS_CURRENT_COL) == True)
+    new_and_changed = df.join(
+        current_target_after.select(primary_keys + attribute_columns),
+        on=primary_keys,
+        how="left_anti"
+    )
+
+    if new_and_changed.take(1):
+        new_and_changed = new_and_changed.drop(sk_column_name) if sk_column_name in new_and_changed.columns else new_and_changed
+        new_and_changed = _generate_surrogate_key(
+            new_and_changed, lakehouse_name, schema_name, table_name, table_prefix, new_table=False
+        )
+        new_and_changed = new_and_changed.select(existing_current.columns)
+        return existing_noncurrent.unionByName(updated_current).unionByName(new_and_changed)
+
+    return existing_noncurrent.unionByName(updated_current)
 
 
 def _create_unknown_record(df: DataFrame) -> DataFrame:
@@ -360,8 +505,31 @@ def _discover_and_map_foreign_keys(df: DataFrame, lakehouse_name: str, schema_na
         dim_path = f"{lakehouse_name}.{schema_name}.{target_dim}"
         print(f"Mapping {col_name} -> {sk_col} (using {dim_path})")
 
-        dim_df = spark.table(dim_path).select(col_name, sk_col)
+        dim_table_df = spark.table(dim_path)
+        if IS_CURRENT_COL in dim_table_df.columns:
+            # SCD2 dimensions keep multiple physical rows per business key (an
+            # expired row plus a current row, each with a different surrogate
+            # key) -- join against the current row only, or a fact matches both
+            # and is silently duplicated, one copy per historical version.
+            dim_table_df = dim_table_df.filter(F.col(IS_CURRENT_COL) != False)
+        dim_df = dim_table_df.select(col_name, sk_col)
+
         df = df.join(dim_df, on=col_name, how="left")
+
+        unmatched_df = df.filter(F.col(sk_col).isNull())
+        unmatched_count = unmatched_df.count()
+        if unmatched_count > 0:
+            sample_keys = [
+                row[col_name] for row in
+                unmatched_df.select(col_name).distinct().limit(5).collect()
+            ]
+            print(
+                f"Warning: {unmatched_count} row(s) for '{col_name}' had no match in {dim_path} "
+                f"and fell back to Unknown ({UNKNOWN_KEY_VALUE}). Sample unmatched value(s): {sample_keys}"
+            )
+        else:
+            print(f"All rows for '{col_name}' matched successfully against {dim_path}")
+
         df = df.withColumn(sk_col, F.coalesce(F.col(sk_col), F.lit(UNKNOWN_KEY_VALUE)))
         df = df.drop(col_name)
 
@@ -404,7 +572,8 @@ def write_dimension_type1(
     table_prefix: str = DIM_TABLE_PREFIX,
     full_refresh: bool = False,
     recreate_table: bool = False,
-    create_unknown_record: bool = True
+    create_unknown_record: bool = True,
+    key_columns: Optional[List[str]] = None
 ) -> DataFrame:
     """Load a Slowly Changing Dimension Type 1 (overwrite changes)."""
     table_name = table_name.lower()
@@ -412,22 +581,43 @@ def write_dimension_type1(
     full_table_name = _full_table_name(lakehouse_name, schema_name, table_prefix, table_name)
     table_exists = not recreate_table and spark.catalog.tableExists(full_table_name)
 
-    df = _generate_surrogate_key(df, lakehouse_name, schema_name, table_name, table_prefix, new_table=not table_exists)
+    column_info = _identify_column_types(df, table_name, key_columns)
+    if not column_info["primary_keys"]:
+        raise ValueError(
+            f"write_dimension_type1('{full_table_name}'): could not determine primary key column(s). "
+            f"Pass key_columns explicitly, or name the business key column(s) with a '{BK_SUFFIX}' suffix."
+        )
+    primary_keys = column_info["primary_keys"]
+    sk_column_name = column_info["surrogate_key"]
+
+    full_refresh_with_history = full_refresh and table_exists
+
+    if full_refresh_with_history:
+        # Carry forward each existing member's surrogate key instead of
+        # reassigning every key on the blind-overwrite that follows.
+        df = _preserve_surrogate_keys_scd1(
+            df, full_table_name, primary_keys, sk_column_name,
+            lakehouse_name, schema_name, table_name, table_prefix
+        )
+    else:
+        df = _generate_surrogate_key(df, lakehouse_name, schema_name, table_name, table_prefix, new_table=not table_exists)
+
     df = _append_audit_timestamps(df)
 
-    if not table_exists and create_unknown_record:
-        print(f"Creating new dimension table with unknown record: {full_table_name}")
+    # The overwrite below (whether from a brand-new table or full_refresh on an
+    # existing one) replaces every row, so the Unknown record must be re-added
+    # in both cases, not only on first creation.
+    if create_unknown_record and (not table_exists or full_refresh):
+        print(f"{'Creating new dimension table' if not table_exists else 'Full refresh'} with unknown record: {full_table_name}")
         df = _create_unknown_record(df)
-
-    column_info = _identify_column_types(df, table_name)
 
     if not table_exists or full_refresh:
         df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(full_table_name)
         print(f"Full refresh completed for {full_table_name}")
     else:
         delta_table = DeltaTable.forName(spark, full_table_name)
-        merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in column_info["primary_keys"])
-        update_dict = {col: f"source.{col}" for col in df.columns if col != column_info["surrogate_key"]}
+        merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in primary_keys)
+        update_dict = {col: f"source.{col}" for col in df.columns if col != sk_column_name}
         update_dict[MODIFIED_COL] = "current_timestamp()"
 
         delta_table.alias("target").merge(df.alias("source"), merge_conditions) \
@@ -448,7 +638,8 @@ def write_dimension_type2(
     valid_from_column: Optional[str] = None,
     full_refresh: bool = False,
     recreate_table: bool = False,
-    create_unknown_record: bool = True
+    create_unknown_record: bool = True,
+    key_columns: Optional[List[str]] = None
 ) -> DataFrame:
     """Load a Slowly Changing Dimension Type 2 (track history)."""
     table_name = table_name.lower()
@@ -456,31 +647,67 @@ def write_dimension_type2(
     full_table_name = _full_table_name(lakehouse_name, schema_name, table_prefix, table_name)
     table_exists = not recreate_table and spark.catalog.tableExists(full_table_name)
 
-    df = _generate_surrogate_key(df, lakehouse_name, schema_name, table_name, table_prefix, new_table=not table_exists)
+    # Resolved once, up front, on the raw incoming columns -- system columns
+    # (sk / audit / SCD2 tracking) aren't appended yet at this point, so
+    # column_info["attributes"] already comes back as exactly the business
+    # attribute columns, same as if this were computed after they're appended.
+    column_info = _identify_column_types(df, table_name, key_columns)
+    if not column_info["primary_keys"]:
+        raise ValueError(
+            f"write_dimension_type2('{full_table_name}'): could not determine primary key column(s). "
+            f"Pass key_columns explicitly, or name the business key column(s) with a '{BK_SUFFIX}' suffix."
+        )
+    primary_keys = column_info["primary_keys"]
+    attribute_columns = column_info["attributes"]
+    sk_column_name = column_info["surrogate_key"]
+
+    full_refresh_with_history = full_refresh and table_exists
+
+    if not full_refresh_with_history:
+        df = _generate_surrogate_key(df, lakehouse_name, schema_name, table_name, table_prefix, new_table=not table_exists)
+
     df = _append_audit_timestamps(df)
     df = _append_scd_type2_columns(df)
 
     if valid_from_column and valid_from_column in df.columns:
         df = df.withColumn(valid_from_column, F.col(valid_from_column).cast("date"))
 
-    if not table_exists and create_unknown_record:
-        print(f"Creating new SCD2 dimension table with unknown record: {full_table_name}")
-        df = _create_unknown_record(df)
+    # The overwrite below (whether from a brand-new table or full_refresh on an
+    # existing one) replaces every row, so the Unknown record must be re-added
+    # in both cases, not only on first creation.
+    add_unknown_record = create_unknown_record and (not table_exists or full_refresh)
 
-    column_info = _identify_column_types(df, table_name)
+    if full_refresh_with_history:
+        # Preserve history (valid_from/valid_to/is_current) and existing
+        # surrogate keys instead of dropping them on the blind overwrite that
+        # full_refresh would otherwise perform -- consistent with what the
+        # ordinary merge branch below would itself have produced.
+        df = _full_refresh_scd2_with_history(
+            df, full_table_name, primary_keys, attribute_columns, sk_column_name,
+            valid_from_column, lakehouse_name, schema_name, table_name, table_prefix
+        )
+        if add_unknown_record:
+            print(f"Full refresh (history preserved) with unknown record: {full_table_name}")
+            df = _create_unknown_record(df)
+        df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(full_table_name)
+        print(f"Full refresh (history preserved) completed for {full_table_name}")
+        return df
 
-    if not table_exists or full_refresh:
+    if not table_exists:
+        if add_unknown_record:
+            print(f"Creating new SCD2 dimension table with unknown record: {full_table_name}")
+            df = _create_unknown_record(df)
         df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(full_table_name)
         print(f"Full refresh completed for {full_table_name}")
         return df
 
     delta_table = DeltaTable.forName(spark, full_table_name)
-    merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in column_info["primary_keys"])
+    merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in primary_keys)
     merge_conditions += f" AND target.{IS_CURRENT_COL} = true"
     change_conditions = " OR ".join(
         f"target.{attr} != source.{attr} OR (target.{attr} IS NULL AND source.{attr} IS NOT NULL) "
         f"OR (target.{attr} IS NOT NULL AND source.{attr} IS NULL)"
-        for attr in column_info["attributes"]
+        for attr in attribute_columns
     )
 
     delta_table.alias("target").merge(df.alias("source"), merge_conditions).whenMatchedUpdate(
@@ -494,20 +721,16 @@ def write_dimension_type2(
 
     current_target = spark.table(full_table_name).filter(F.col(IS_CURRENT_COL) == True)
     new_and_changed = df.join(
-        current_target.select(column_info["primary_keys"] + column_info["attributes"]),
-        on=column_info["primary_keys"],
+        current_target.select(primary_keys + attribute_columns),
+        on=primary_keys,
         how="left_anti"
     )
 
     if new_and_changed.count() > 0:
-        max_sk = delta_table.toDF().agg(F.max(column_info["surrogate_key"])).collect()[0][0] or 0
-        new_and_changed = new_and_changed.drop(column_info["surrogate_key"])
-        new_and_changed = new_and_changed.withColumn(
-            column_info["surrogate_key"], F.monotonically_increasing_id() + max_sk + 1
+        new_and_changed = new_and_changed.drop(sk_column_name)
+        new_and_changed = _generate_surrogate_key(
+            new_and_changed, lakehouse_name, schema_name, table_name, table_prefix, new_table=False
         )
-        cols = new_and_changed.columns
-        cols.remove(column_info["surrogate_key"])
-        new_and_changed = new_and_changed.select([column_info["surrogate_key"]] + cols)
         new_and_changed.write.format("delta").mode("append").saveAsTable(full_table_name)
 
     print(f"SCD2 merge completed for {full_table_name}")
@@ -532,33 +755,42 @@ def load_dimension(
     valid_from_column: Optional[str] = None,
     full_refresh: bool = False,
     recreate_table: bool = False,
-    create_unknown_record: bool = True
+    create_unknown_record: bool = True,
+    key_columns: Optional[List[str]] = None
 ) -> DataFrame:
     """
     Load a dimension table into Gold. Facade over SCD Type 1 / Type 2.
 
     Args:
-        df: Source DataFrame. Business key column(s) should end in '_key'.
+        df: Source DataFrame. Business key column(s) should end in '_key'
+            unless key_columns is passed explicitly.
         lakehouse_name: Target lakehouse (e.g. 'Gold').
         table_name: Table name without prefix (e.g. 'customer' -> gold.dim_customer).
         schema_name: Target schema (default 'gold').
         dimension_type: 'scd1' (overwrite changes) or 'scd2' (track history).
         valid_from_column: For SCD2, column to use for effective dating.
-        full_refresh: Drop and rewrite all rows instead of merging.
+        full_refresh: Drop and rewrite all rows instead of merging. On an
+            already-existing table, previously-existing members keep their
+            surrogate key (and, for SCD2, their history) instead of every key
+            being reassigned.
         recreate_table: Drop and recreate the table from scratch.
-        create_unknown_record: Add a -1 "Unknown" member row on first creation.
+        create_unknown_record: Add a -1 "Unknown" member row on first creation
+            (and on every full_refresh, since that replaces the whole table).
+        key_columns: Explicit business/primary key column(s), overriding the
+            default '_key'-suffix inference. Required when the source doesn't
+            follow that naming convention.
     """
     if dimension_type.lower() == "scd1":
         print(f"Loading dimension as SCD Type 1: {table_name}")
         return write_dimension_type1(
             df, lakehouse_name, table_name, schema_name, table_prefix,
-            full_refresh, recreate_table, create_unknown_record
+            full_refresh, recreate_table, create_unknown_record, key_columns
         )
     elif dimension_type.lower() == "scd2":
         print(f"Loading dimension as SCD Type 2: {table_name}")
         return write_dimension_type2(
             df, lakehouse_name, table_name, schema_name, table_prefix,
-            valid_from_column, full_refresh, recreate_table, create_unknown_record
+            valid_from_column, full_refresh, recreate_table, create_unknown_record, key_columns
         )
     else:
         raise ValueError(f"Invalid dimension_type: '{dimension_type}'. Must be 'scd1' or 'scd2'.")
@@ -670,6 +902,44 @@ def load_fact(
         )
 
     print(f"Fact load completed: {full_table_name}")
+    return df
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# ============================================================
+# SILVER FACADE -- shared write helper for Silver-layer notebooks
+# ============================================================
+
+def write_silver_table(
+    df: DataFrame,
+    lakehouse_name: str,
+    table_name: str,
+    schema_name: str = "silver",
+    mode: str = "overwrite"
+) -> DataFrame:
+    """
+    Write a Silver table, reusing the same schema-creation and audit-timestamp
+    conventions as the Gold facade (_ensure_schema / _append_audit_timestamps)
+    instead of every Silver notebook hand-rolling its own write and inventing
+    its own audit-column name.
+    """
+    _ensure_schema(lakehouse_name, schema_name)
+    full_table_name = f"{lakehouse_name}.{schema_name}.{table_name.lower()}"
+    df = _append_audit_timestamps(df)
+
+    writer = df.write.format("delta").mode(mode)
+    if mode.lower() == "overwrite":
+        writer = writer.option("overwriteSchema", "true")
+    writer.saveAsTable(full_table_name)
+
+    print(f"Wrote Silver table: {full_table_name}")
     return df
 
 # METADATA ********************

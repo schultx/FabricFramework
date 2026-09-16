@@ -58,6 +58,22 @@ CREATE TABLE [ingestion].[Connection] (
 )
 GO
 
+-- ---- guarded additions below: audit columns, enum CHECK, FK-lookup index ----
+-- (this table may already be deployed and populated in dev/test/prod -- every
+-- addition here is existence-guarded so re-running this file is a no-op once applied)
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('[ingestion].[Connection]') AND name = 'CreatedUtc')
+ALTER TABLE [ingestion].[Connection] ADD [CreatedUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_Connection_CreatedUtc DEFAULT SYSUTCDATETIME()
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('[ingestion].[Connection]') AND name = 'ModifiedUtc')
+ALTER TABLE [ingestion].[Connection] ADD [ModifiedUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_Connection_ModifiedUtc DEFAULT SYSUTCDATETIME()
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Connection_ConnectionType')
+ALTER TABLE [ingestion].[Connection] WITH CHECK ADD CONSTRAINT [CK_Connection_ConnectionType]
+    CHECK ([ConnectionType] IN ('Sql','File','SqlMI','Oracle','Sftp','Ftp','OneLakeTable','OneLakeFile','Custom'))
+GO
+
 -- One row per database/container/lakehouse within a Connection -- exact meaning of Name depends on
 -- ConnectionType; see the comment above ingestion.Connection.
 IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'ingestion' AND t.name = 'Database')
@@ -67,6 +83,19 @@ CREATE TABLE [ingestion].[Database] (
     [Name]         VARCHAR(200) NOT NULL,                 -- source database name (Sql/SqlMI/Oracle), container/filesystem name (File), or source lakehouse GUID (OneLakeTable/OneLakeFile)
     [IsActive]     BIT NOT NULL DEFAULT 1
 )
+GO
+
+-- ---- guarded additions below: audit columns, FK-lookup index ----
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('[ingestion].[Database]') AND name = 'CreatedUtc')
+ALTER TABLE [ingestion].[Database] ADD [CreatedUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_Database_CreatedUtc DEFAULT SYSUTCDATETIME()
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('[ingestion].[Database]') AND name = 'ModifiedUtc')
+ALTER TABLE [ingestion].[Database] ADD [ModifiedUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_Database_ModifiedUtc DEFAULT SYSUTCDATETIME()
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('[ingestion].[Database]') AND name = 'IX_Database_ConnectionId')
+CREATE NONCLUSTERED INDEX [IX_Database_ConnectionId] ON [ingestion].[Database]([ConnectionId])
 GO
 
 -- One row per table drives its ENTIRE Source -> Landing -> Bronze flow when active.
@@ -90,6 +119,52 @@ CREATE TABLE [ingestion].[Table] (
     [CustomNotebookName] NVARCHAR(200) NULL,              -- populated only when the row's Connection.ConnectionType = 'Custom' -- the hand-written notebook (config/items.yaml) that lands this table; see DEPLOYMENT.md's "Custom sources" section
     [IsActive]           BIT NOT NULL DEFAULT 1
 )
+GO
+
+-- ---- guarded additions below: audit columns, IncrementalColumnType,
+-- enum/conditional-required CHECKs, FK-lookup index ----
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('[ingestion].[Table]') AND name = 'CreatedUtc')
+ALTER TABLE [ingestion].[Table] ADD [CreatedUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_Table_CreatedUtc DEFAULT SYSUTCDATETIME()
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('[ingestion].[Table]') AND name = 'ModifiedUtc')
+ALTER TABLE [ingestion].[Table] ADD [ModifiedUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_Table_ModifiedUtc DEFAULT SYSUTCDATETIME()
+GO
+
+-- Nullable, back-compat: NULL means "assume datetime", matching every row that
+-- existed before this column did. Set to 'numeric' for a table whose
+-- IncrementalColumn is a change-tracking sequence/version counter rather than
+-- a date/datetime, so vw_ActiveIngestTables seeds the first-run watermark
+-- filter with a type-appropriate default instead of the datetime-shaped
+-- '1900-01-01' literal.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('[ingestion].[Table]') AND name = 'IncrementalColumnType')
+ALTER TABLE [ingestion].[Table] ADD [IncrementalColumnType] VARCHAR(20) NULL  -- datetime | numeric; NULL = assume datetime
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Table_LoadType')
+ALTER TABLE [ingestion].[Table] WITH CHECK ADD CONSTRAINT [CK_Table_LoadType]
+    CHECK ([LoadType] IN ('Full','Delta'))
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Table_DeleteHandling')
+ALTER TABLE [ingestion].[Table] WITH CHECK ADD CONSTRAINT [CK_Table_DeleteHandling]
+    CHECK ([DeleteHandling] IN ('None','SoftDelete','Reconcile'))
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Table_IncrementalColumn_RequiredForDelta')
+ALTER TABLE [ingestion].[Table] WITH CHECK ADD CONSTRAINT [CK_Table_IncrementalColumn_RequiredForDelta]
+    CHECK ([LoadType] <> 'Delta' OR [IncrementalColumn] IS NOT NULL)
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Table_IsDeletedColumn_RequiredForSoftDelete')
+ALTER TABLE [ingestion].[Table] WITH CHECK ADD CONSTRAINT [CK_Table_IsDeletedColumn_RequiredForSoftDelete]
+    CHECK ([DeleteHandling] <> 'SoftDelete' OR [IsDeletedColumn] IS NOT NULL)
+GO
+-- NOTE: FileType is deliberately NOT enum-CHECK'd here -- it isn't a fixed value
+-- set. It defaults to 'parquet' but is passed straight through to Spark's
+-- generic reader as `.format(entity["FileType"].lower())` in NB_LOAD_BRONZE
+-- (csv gets header/inferSchema handling; any other Spark-supported format
+-- string is otherwise accepted as-is) -- see Metadata-Model.md.
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('[ingestion].[Table]') AND name = 'IX_Table_DatabaseId')
+CREATE NONCLUSTERED INDEX [IX_Table_DatabaseId] ON [ingestion].[Table]([DatabaseId])
 GO
 
 -- ============================================================
@@ -123,6 +198,30 @@ CREATE TABLE [runtime].[LoadWatermark] (
     [LastValue]    NVARCHAR(100) NULL,                    -- MAX(IncrementalColumn) seen as of LastRunUtc
     [LastRunUtc]   DATETIME2(7) NULL
 )
+GO
+
+-- ---- guarded additions below: format CHECK (defense-in-depth alongside the
+-- escaping in vw_ActiveIngestTables), uniqueness on the pair the view joins on ----
+
+-- Whitelist-based: only digits/letters/space/colon/dot/slash/hyphen -- covers
+-- date/datetime (e.g. '2024-01-01', '2024-01-01T12:00:00.000Z') and numeric
+-- (e.g. '12345', '3.14') shaped watermarks, while rejecting a single-quote (or
+-- any other SQL-metacharacter) outright as a backstop even if the escaping in
+-- vw_ActiveIngestTables were ever bypassed by a future writer.
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_LoadWatermark_LastValue_Format')
+ALTER TABLE [runtime].[LoadWatermark] WITH CHECK ADD CONSTRAINT [CK_LoadWatermark_LastValue_Format]
+    CHECK ([LastValue] IS NULL OR [LastValue] NOT LIKE '%[^0-9A-Za-z :./-]%')
+GO
+
+-- vw_ActiveIngestTables joins on this pair; a stray duplicate (manual
+-- troubleshooting insert, any future writer that inserts instead of upserts)
+-- would otherwise fan the view's watermark lookup out into duplicate ingest
+-- items for the same table. NOTE: if a duplicate (EntityType, EntityId) pair
+-- already exists in a given environment, this CREATE UNIQUE INDEX will fail on
+-- first re-deploy until that duplicate is manually resolved -- not verifiable
+-- from this offline change; see summary.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('[runtime].[LoadWatermark]') AND name = 'UQ_LoadWatermark_EntityType_EntityId')
+CREATE UNIQUE INDEX [UQ_LoadWatermark_EntityType_EntityId] ON [runtime].[LoadWatermark]([EntityType], [EntityId])
 GO
 
 -- ============================================================
@@ -188,9 +287,21 @@ SELECT
         WHEN t.[LoadType] = 'Delta' THEN
             -- QUOTENAME the incremental column -- a source column name that's a
             -- reserved word or needs bracket-quoting would otherwise break the
-            -- generated SQL a PL_INGEST_* Lookup actually runs.
+            -- generated SQL a PL_INGEST_* Lookup actually runs. The watermark
+            -- VALUE itself isn't an identifier -- it's free-form NVARCHAR, so it
+            -- gets REPLACE-escaped ('''' -> '''''', i.e. each embedded single
+            -- quote doubled) before splicing into the string literal below;
+            -- otherwise an apostrophe in LastValue would terminate the literal
+            -- early and let the remainder execute as raw SQL against the source.
+            -- First-run seed (no watermark row yet) defaults to a type-appropriate
+            -- literal based on IncrementalColumnType -- '1900-01-01' for
+            -- datetime-shaped columns (also the fallback when the column is NULL,
+            -- preserving pre-existing behavior for every row that predates this
+            -- column) or '0' for numeric/change-tracking-sequence columns.
             'SELECT * FROM (' + base.[BaseQuery] + ') AS w WHERE ' + QUOTENAME(t.[IncrementalColumn])
-                + ' > ''' + ISNULL(w.[LastValue], '1900-01-01') + ''''
+                + ' > ''' + REPLACE(
+                    ISNULL(w.[LastValue], CASE t.[IncrementalColumnType] WHEN 'numeric' THEN '0' ELSE '1900-01-01' END),
+                    '''', '''''') + ''''
         ELSE base.[BaseQuery]
     END AS ResolvedSourceQuery
 FROM [ingestion].[Table] t
@@ -203,6 +314,21 @@ CROSS APPLY (
         ELSE 'SELECT * FROM ' + ISNULL(QUOTENAME(t.[SourceSchema]) + '.', '') + QUOTENAME(t.[SourceObject])
     END AS BaseQuery
 ) base
-LEFT JOIN [runtime].[LoadWatermark] w ON w.[EntityType] = 'Table' AND w.[EntityId] = t.[TableId]
+OUTER APPLY (
+    -- OUTER APPLY + TOP 1 ... ORDER BY LastRunUtc DESC instead of a plain LEFT
+    -- JOIN: a stray duplicate (EntityType, EntityId) row in LoadWatermark can no
+    -- longer fan this view out into duplicate ingest items for the same table --
+    -- at most one watermark row is ever picked (the most recent one). The UNIQUE
+    -- index on LoadWatermark(EntityType, EntityId) above is the primary guard;
+    -- this is defense-in-depth so the view stays correct even before that
+    -- constraint is in place in every environment. OUTER (not CROSS) APPLY
+    -- preserves the original LEFT JOIN's behavior of still returning the table
+    -- when no watermark row exists yet (e.g. a brand-new Delta table's very
+    -- first run, before NB_LOAD_BRONZE has ever written one).
+    SELECT TOP (1) lw.[LastValue]
+    FROM [runtime].[LoadWatermark] lw
+    WHERE lw.[EntityType] = 'Table' AND lw.[EntityId] = t.[TableId]
+    ORDER BY lw.[LastRunUtc] DESC
+) w
 WHERE t.[IsActive] = 1 AND d.[IsActive] = 1 AND c.[IsActive] = 1 AND c.[ConnectionType] <> 'Custom'
 GO

@@ -11,10 +11,20 @@
 #
 # Required ADO Environments (Pipelines -> Environments): fabricframework-dev,
 # fabricframework-test, fabricframework-prod -- add required reviewers on test/prod.
+#
+# The Dev/Test/Prod deploy steps themselves live in templates/deploy-stage.yml
+# (parameters: envArg, adoEnvironment, displayNameSuffix) so a pipeline-wide change
+# only has to be made in one place.
 
 trigger:
   branches:
     include: [main]
+
+# Opening a PR must NOT also fire a live Dev deploy. ADO's documented default for an
+# omitted `pr:` block is an implicit trigger on any pull request -- since Dev's
+# deployment job has no required reviewer, that would silently run a real, unattended
+# NB_DEPLOY against live Dev infrastructure just from someone opening a PR for review.
+pr: none
 
 pool:
   vmImage: ubuntu-latest
@@ -23,68 +33,92 @@ variables:
   - group: fabric-framework-secrets
 
 stages:
-  - stage: Dev
+  - stage: Validate
+    # No Fabric credentials required here on purpose -- pure static checks so a trivial
+    # mistake (a syntax error, a broken config/*.yaml, a stale NB_DEPLOY.ipynb) is caught
+    # before burning real deploy time against live infrastructure in the stages below
+    # (each Dev/Test/Prod attempt can run up to an hour, up to 5 attempts).
     jobs:
-      - deployment: DeployDev
-        environment: fabricframework-dev
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - checkout: self
-                - task: UsePythonVersion@0
-                  inputs: { versionSpec: '3.11' }
-                - script: pip install -r deploy/requirements.txt
-                  displayName: Install dependencies
-                - script: python deploy/run_notebook.py --environment development
-                  displayName: Run NB_DEPLOY (development)
-                  env:
-                    FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
-                    FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
-                    FABRIC_TENANT_ID: $(FABRIC_TENANT_ID)
-                    FABRIC_WORKSPACE_ID: $(FABRIC_WORKSPACE_ID)
-                    FABRIC_NOTEBOOK_ID: $(FABRIC_NOTEBOOK_ID)
+      - job: ValidateConfig
+        steps:
+          - checkout: self
+          - task: UsePythonVersion@0
+            inputs: { versionSpec: '3.11' }
+          - script: pip install pyyaml
+            displayName: Install validation dependencies
+          - script: python -m py_compile deploy/*.py setup/*.py
+            displayName: Syntax check (deploy/*.py, setup/*.py)
+          - script: |
+              python - <<'PY'
+              import glob, sys, yaml
+              ok = True
+              for f in sorted(glob.glob("config/*.yaml")):
+                  try:
+                      yaml.safe_load(open(f))
+                      print(f"OK: {f}")
+                  except Exception as e:
+                      print(f"FAILED: {f}: {e}")
+                      ok = False
+              sys.exit(0 if ok else 1)
+              PY
+            displayName: YAML validation (config/*.yaml)
+          - script: |
+              python setup/build_nb_deploy.py
+              git diff --exit-code -- setup/NB_DEPLOY.ipynb
+            displayName: NB_DEPLOY.ipynb matches build_nb_deploy.py (no drift)
+
+  - stage: Dev
+    dependsOn: Validate
+    jobs:
+      - template: templates/deploy-stage.yml
+        parameters:
+          envArg: development
+          adoEnvironment: fabricframework-dev
+          displayNameSuffix: development
+      # TODO (CI/CD #1 -- WIF migration, NOT done yet): this stage's job (templates/deploy-stage.yml)
+      # still authenticates with the shared FABRIC_CLIENT_SECRET from the fabric-framework-secrets
+      # variable group. The `fabricframework-dev-wif` service connection has been provisioned
+      # (see docs/wiki/Deployment-Guide.md, "Setting up WIF") but this pipeline has not yet been
+      # cut over to use it -- see that doc section and the TODO in the template's env: block for a
+      # concrete sketch of the serviceConnection-based step.
 
   - stage: Test
     dependsOn: Dev
     jobs:
-      - deployment: DeployTest
-        environment: fabricframework-test   # approval gate lives on this ADO Environment
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - checkout: self
-                - task: UsePythonVersion@0
-                  inputs: { versionSpec: '3.11' }
-                - script: pip install -r deploy/requirements.txt
-                - script: python deploy/run_notebook.py --environment test
-                  displayName: Run NB_DEPLOY (test)
-                  env:
-                    FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
-                    FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
-                    FABRIC_TENANT_ID: $(FABRIC_TENANT_ID)
-                    FABRIC_WORKSPACE_ID: $(FABRIC_WORKSPACE_ID)
-                    FABRIC_NOTEBOOK_ID: $(FABRIC_NOTEBOOK_ID)
+      - template: templates/deploy-stage.yml
+        parameters:
+          envArg: test
+          adoEnvironment: fabricframework-test   # approval gate lives on this ADO Environment
+          displayNameSuffix: test
+      # TODO (CI/CD #1 -- WIF migration, NOT done yet): same as Dev above, but for the
+      # `fabricframework-test-wif` service connection.
+      - job: NotifyTestFailure
+        dependsOn: Deploy_test
+        condition: failed()
+        steps:
+          - script: |
+              echo "##vso[task.logissue type=error]NB_DEPLOY failed for environment 'test' (fabricframework-test). See the Deploy_test job above for the real error."
+            displayName: 'Notify: Test deploy failed'
+            # Placeholder notification -- a real Teams/Slack/email alert needs a webhook this
+            # repo does not have configured. Plug a real call in here (curl to a webhook URL, or
+            # an ADO marketplace "Post to Teams/Slack" task) once one exists. See
+            # docs/wiki/Operations-Guide.md for what state a failed run leaves an environment in.
 
   - stage: Prod
     dependsOn: Test
     jobs:
-      - deployment: DeployProd
-        environment: fabricframework-prod   # approval gate lives on this ADO Environment too
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - checkout: self
-                - task: UsePythonVersion@0
-                  inputs: { versionSpec: '3.11' }
-                - script: pip install -r deploy/requirements.txt
-                - script: python deploy/run_notebook.py --environment production
-                  displayName: Run NB_DEPLOY (production)
-                  env:
-                    FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
-                    FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
-                    FABRIC_TENANT_ID: $(FABRIC_TENANT_ID)
-                    FABRIC_WORKSPACE_ID: $(FABRIC_WORKSPACE_ID)
-                    FABRIC_NOTEBOOK_ID: $(FABRIC_NOTEBOOK_ID)
+      - template: templates/deploy-stage.yml
+        parameters:
+          envArg: production
+          adoEnvironment: fabricframework-prod   # approval gate lives on this ADO Environment too
+          displayNameSuffix: production
+      # TODO (CI/CD #1 -- WIF migration, NOT done yet): same as Dev above, but for the
+      # `fabricframework-prod-wif` service connection.
+      - job: NotifyProdFailure
+        dependsOn: Deploy_production
+        condition: failed()
+        steps:
+          - script: |
+              echo "##vso[task.logissue type=error]NB_DEPLOY failed for environment 'production' (fabricframework-prod). See the Deploy_production job above for the real error."
+            displayName: 'Notify: Prod deploy failed'
+            # Placeholder notification -- see the Test stage's NotifyTestFailure job comment above.

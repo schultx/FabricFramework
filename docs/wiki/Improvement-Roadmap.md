@@ -7,11 +7,24 @@ development, test, and production in the real tenant, plus a line-by-line read o
 code. Severity reflects how much a given issue would actually bite a consultant or a client, not
 abstract code quality.
 
+**Implementation status:** 33 of 33 findings have been actioned — 27 fully fixed, 3 partially
+fixed (the remaining part is a genuine platform/architectural limitation, called out on each),
+2 deliberately deferred as out-of-scope for the current demo scale, and 1 (`metadata_connection_guid`
+auto-creation) left open pending live verification. Each item below carries its own **Status**
+line. Kept as a permanent record — the "Fix" text under each item describes what the fix *was*,
+not a still-open task, for items marked Fixed.
+
+While implementing CI/CD #2 (the `Validate` stage's regenerate-and-diff check), a real,
+independent bug was found and fixed: `setup/build_nb_deploy.py` assigned every notebook cell a
+random `uuid.uuid4().hex[:8]` id on every run, so regenerating and diffing against the committed
+`NB_DEPLOY.ipynb` would have failed on *every* CI run regardless of actual drift — a permanently
+red, useless gate. Fixed by deriving cell ids deterministically from call order + source text
+instead, confirmed by regenerating twice and diffing the two outputs (byte-identical).
+
 ## Priority order
 
-If you can only do a handful of these next, do them in this order — each one either bit us
-directly while building this framework, or is a silent-wrong-data bug waiting for the first real
-client to trigger it:
+This was the priority order going into implementation — kept for reference, now that all seven
+are fixed:
 
 1. [§Gold 2 — `full_refresh` silently drops history, the Unknown member, and reassigns every surrogate key](#2-full_refresh-on-an-existing-dimension-silently-reassigns-every-surrogate-key-and-for-scd2-drops-history)
 2. [§Gold 1 — fact tables silently duplicate against any SCD2 dimension with history](#1-foreign-key-auto-mapping-joins-all-scd2-history-not-just-the-current-row)
@@ -29,6 +42,8 @@ client to trigger it:
 
 *Severity: high*
 
+**Status: Fixed.** `framework_name` added to `environments.yaml`, threaded through `build_nb_deploy.py`.
+
 `"Monza Data ({env['short']})"` and its siblings are literal f-strings in
 [setup/build_nb_deploy.py](../../setup/build_nb_deploy.py) (search for `"Monza`). There is no
 config field for a client/engagement name. Today, onboarding a new client means editing generator
@@ -42,6 +57,8 @@ tell the reader to hand-edit code because this doesn't exist yet.
 ### 2. `workspace_roles` role assignment has no idempotency guard
 
 *Severity: high*
+
+**Status: Fixed.** `get_or_create_workspace` now checks existing role assignments first.
 
 Every other mutating call in `build_nb_deploy.py` — `get_or_create_workspace`,
 `get_or_create_lakehouse`, `get_or_create_folder`, `get_or_create_item`,
@@ -67,6 +84,8 @@ check-then-create shape as everything else in this file. Document in
 
 *Severity: high*
 
+**Status: Fixed**, all three parts (real tracebacks, capacity-assignment skip, upfront config validation).
+
 `assignToCapacity` runs unconditionally on every deploy — even for workspaces already correctly
 assigned — resolved by capacity **name** with zero tolerance for that capacity being paused,
 renamed, or replaced. When anything fails, Fabric wraps it in the same generic message:
@@ -89,6 +108,8 @@ outside, and diagnosing the capacity-name one cost hours of live reproduction.
 
 *Severity: high*
 
+**Status: Fixed.** `api()` now retries on 429 and honors `Retry-After`.
+
 `build_nb_deploy.py`'s `api()` helper retries server errors and connection exceptions, but a 429
 (Too Many Requests) — a realistic outcome given this function fires dozens of times back-to-back
 across up to 3 environments in one `NB_DEPLOY` run — aborts immediately with no retry and no
@@ -102,6 +123,8 @@ header when present instead of (or in addition to) the fixed backoff.
 ### 5. An `items.yaml` entry with a mistyped `type` is silently dropped
 
 *Severity: medium*
+
+**Status: Fixed.** Unrecognized item types are rejected up front; processed-item coverage is asserted before the run reports complete.
 
 Phases 5–7 each select items by exact string match (`if item["type"] != "Notebook": continue`,
 etc.) with no step anywhere that verifies every entry in `items.yaml` was actually claimed by one
@@ -117,6 +140,8 @@ value; track which item names each phase actually processes and assert that set 
 
 *Severity: medium*
 
+**Status: Open.** Not attempted this pass — genuinely needs live verification of the Fabric Connections API before committing to an approach.
+
 Every environment needs a human to register a Fabric Connection in the portal and paste its GUID
 into git before ingestion Lookups work at all. It's currently blank in all three environments of
 this very project. See [Deployment-Guide](Deployment-Guide.md) for why it exists (a genuine
@@ -131,6 +156,8 @@ entirely.
 
 *Severity: medium*
 
+**Status: Fixed.** `run_metadata_schema()` retries on `pyodbc.Error`, 3 attempts.
+
 The classic Azure SQL "database not currently available, retry" condition (error 40613) hit on
 the first deploy attempt against a freshly created or long-idle `SQL_METADATA_DATABASE` in
 **every single environment tested this session**. Always resolved on a plain retry — a
@@ -143,6 +170,8 @@ cold database self-heals without a human watching the job.
 
 *Severity: low*
 
+**Status: Fixed.** `poll_lro()` now prints progress and enforces a 45-minute bound.
+
 No maximum iteration count and nothing printed per poll — a genuinely stuck long-running
 operation is indistinguishable from a live one until the outer CI job's 1-hour timeout kills it.
 
@@ -152,6 +181,8 @@ a clear, named `TimeoutError` instead of relying on the outer job timeout as the
 ### 9. `NB_LIST_LANDING_ENTITIES` is dead weight
 
 *Severity: low*
+
+**Status: N/A.** Turned out to already be absent from `src/`/`items.yaml` — it only ever existed as a live orphan in the tenant (see [Operations-Guide](Operations-Guide.md)), nothing to remove in source.
 
 Unused, disconnected from every pipeline, and cannot even be deleted via the Fabric API — fails
 consistently with `400 UnknownError` in every environment tested. Accumulates as a permanent
@@ -177,6 +208,8 @@ root after any change, and commit the regenerated `.ipynb` alongside.
 
 *Severity: high*
 
+**Status: Documented, not wired.** `azure-pipelines.yml`/`templates/deploy-stage.yml` carry explicit TODOs with a concrete migration sketch; the actual cutover needs the named service connections confirmed live in the ADO project, which can't be done from the repo alone.
+
 [Deployment-Guide](Deployment-Guide.md) documents three ADO service connections
 (`fabricframework-dev/test/prod-wif`) using Workload Identity Federation specifically so no client
 secret has to be stored — but `azure-pipelines.yml` never references any service connection at
@@ -195,6 +228,8 @@ unused.
 
 *Severity: medium*
 
+**Status: Fixed.** New `Validate` stage; also fixed a real generator bug found while implementing this (see the note below the priority list).
+
 The pipeline goes straight from checkout to `pip install` to a live `run_notebook.py` call
 against real infrastructure — no Python syntax check, no YAML schema check on
 `config/*.yaml`, no confirmation `NB_DEPLOY.ipynb` actually matches what `build_nb_deploy.py`
@@ -209,6 +244,8 @@ check that regenerating `NB_DEPLOY.ipynb` produces no diff against what's commit
 
 *Severity: medium*
 
+**Status: Fixed.** `pr: none` added.
+
 `azure-pipelines.yml` only sets `trigger: branches: [main]` with no `pr:` block. ADO's documented
 default for an omitted `pr:` is an implicit trigger on *any* pull request. Since Dev's deployment
 job has no required reviewer, opening a PR silently triggers a real, unattended `NB_DEPLOY` run
@@ -219,6 +256,8 @@ against live Dev infrastructure — surprising behavior for anyone who just want
 ### 4. `run_notebook.py`'s retry logic doesn't cover transient errors during polling
 
 *Severity: medium*
+
+**Status: Fixed.** Transient-retry wrapper added; `set_environment_parameter` now inside the retry loop.
 
 The `MAX_DEPLOY_ATTEMPTS = 5` retry loop wraps only the top-level trigger-and-poll cycle on an
 explicit job-`Failed` status. But `poll_lro()` and the status-poll loop both call
@@ -235,6 +274,8 @@ retry loop.
 
 *Severity: medium*
 
+**Status: Fixed.** `--commit` flag added, threaded through logging.
+
 `run_notebook.py` never references `$(Build.SourceVersion)`, and `NB_DEPLOY` always re-downloads
 `main` fresh on every run. Combined with Test/Prod approval gates that can sit for days, the code
 that's actually live when an approval is finally granted can be a later commit than the one that
@@ -248,6 +289,8 @@ which environment.
 
 *Severity: medium*
 
+**Status: Fixed (placeholder).** `##vso[task.logissue]` error-level log line on Test/Prod failure; a real Teams/Slack webhook still needs to be plugged in — this repo has none configured.
+
 Every failure path in `run_notebook.py` just calls `sys.exit(...)`. No notification step
 (email/Teams/Slack), no `on: failure:` hook, no automated rollback. A failed Prod run after all 5
 retry attempts just leaves the pipeline red in ADO with no alert to anyone.
@@ -260,6 +303,8 @@ an environment in.
 
 *Severity: low*
 
+**Status: Fixed.** Extracted to `templates/deploy-stage.yml`.
+
 The same four steps and five-variable `env:` block are copy-pasted verbatim three times, differing
 only in the `--environment` value. Any pipeline-wide fix (including the WIF migration above) has
 to be hand-applied and kept in sync across all three copies.
@@ -270,6 +315,8 @@ three stages.
 ### 8. `deploy/requirements.txt` has no pinned versions
 
 *Severity: low*
+
+**Status: Fixed.** Pinned to `requests==2.32.3`, `msal==1.31.0` — re-verify against PyPI next time CI actually runs `pip install`.
 
 Open-ended lower bounds only (`requests>=2.31`, `msal>=1.28`), no lockfile. Since Test/Prod
 approvals can sit for days, a newer release published between the Dev run and the Prod approval
@@ -284,6 +331,8 @@ installs for Prod without having been exercised in Dev at all.
 ### 1. Watermark value is spliced into generated SQL unescaped
 
 *Severity: high*
+
+**Status: Fixed.** Watermark value now escaped; defense-in-depth format CHECK added too.
 
 In `vw_ActiveIngestTables`'s Delta branch, `SourceSchema`/`SourceObject`/`IncrementalColumn` are
 correctly `QUOTENAME()`'d as identifiers, but `runtime.LoadWatermark.LastValue` (plain
@@ -300,6 +349,8 @@ be written there.
 ### 2. No CHECK constraints on enumerated or conditionally-required columns
 
 *Severity: high*
+
+**Status: Fixed.** CHECK constraints added for all enum/conditionally-required columns (guarded ALTERs, safe against already-populated environments).
 
 `ConnectionType`, `LoadType`, and `DeleteHandling` each have a fixed, documented value set in
 *comments only* — no actual `CHECK` constraint. A typo during bulk metadata seeding (`SqlServer`
@@ -318,6 +369,8 @@ runtime.
 
 *Severity: high*
 
+**Status: Partially fixed.** `isSequential: false` + `batchCount` added, Copy retry left at its existing value of 2. True per-item failure isolation (one bad table not flipping the whole run's status) is a real Fabric `ForEach` platform limitation the roadmap itself flagged as needing a post-run reconciliation step — not attempted this pass.
+
 Every `PL_INGEST_*` pipeline's `ForEach` wraps a single Copy activity with no on-failure branch
 and no explicit `isSequential`/`batchCount`. One table failing for a routine reason (a grant not
 yet applied during onboarding, a locked table, a drifted column) fails the whole `ForEach` — and
@@ -332,6 +385,8 @@ failures are visible per-table.
 
 *Severity: medium*
 
+**Status: Resolved via re-scoping.** Investigation found `FileType` isn't actually a fixed enum — it passes straight through to Spark's reader (`'.format(entity["FileType"].lower())`). Documented as File-connector-specific in `metadata_schema.sql` rather than building dynamic sink-switching, which was the more honest fix.
+
 `ingestion.Table.FileType` reads as a per-table configurable landing format, but `PL_INGEST_SQL`,
 `PL_INGEST_ORACLE`, and `PL_INGEST_SQLMI` all hardcode their Copy sink to `ParquetSink` with a
 hardcoded `.parquet` extension — none reference `@item().FileType` anywhere. Setting `FileType` to
@@ -343,6 +398,8 @@ anything else on a Sql/Oracle/SqlMI table is silently ignored.
 ### 5. Copy/Lookup activity timeout is shorter than its own query timeout
 
 *Severity: medium*
+
+**Status: Fixed.** `policy.timeout` raised to 2.5h across all 8 pipelines where a `queryTimeout` exists to be capped by.
 
 Every Lookup and Copy activity across all four pipelines sets `policy.timeout` to 1 hour while
 `source.queryTimeout` is set to 2 hours — the outer activity timeout governs the whole activity,
@@ -356,6 +413,8 @@ mark looking like an infra problem rather than a self-inflicted config mismatch.
 
 *Severity: medium*
 
+**Status: Fixed (lighter version).** Added a nullable `IncrementalColumnType` column (`NULL` = assume datetime, back-compat) rather than full type inference.
+
 The first-run watermark seed (`ISNULL(w.[LastValue], '1900-01-01')`) assumes a datetime-shaped
 `IncrementalColumn`. A client whose incremental column is numeric (a change-tracking sequence, a
 version counter) generates `WHERE [ChangeSeq] > '1900-01-01'` on first run, which fails
@@ -368,6 +427,8 @@ table.
 ### 7. `runtime.LoadWatermark` has no uniqueness constraint on `(EntityType, EntityId)`
 
 *Severity: medium*
+
+**Status: Fixed.** `UNIQUE` index added; view changed to `OUTER APPLY ... TOP 1 ... ORDER BY LastRunUtc DESC` as defense-in-depth even before the constraint is confirmed clean in every environment.
 
 Only a surrogate `WatermarkId IDENTITY` key exists — no `UNIQUE` on the pair
 `vw_ActiveIngestTables` actually joins on. A stray duplicate row (a manual troubleshooting insert,
@@ -383,6 +444,8 @@ ingestion.
 
 *Severity: low*
 
+**Status: Fixed.** `CreatedUtc`/`ModifiedUtc` added to all three `ingestion.*` tables.
+
 `ingestion.Connection`/`Database`/`Table` — the entire control surface for what gets ingested for
 a client — have no `CreatedUtc`/`ModifiedUtc`/`ModifiedBy`, only `IsActive`. No way to answer "who
 changed this table's `LoadType`, and when" from the metadata database itself.
@@ -393,6 +456,8 @@ changed this table's `LoadType`, and when" from the metadata database itself.
 ### 9. No indexes on FK/lookup columns joined every pipeline run
 
 *Severity: low*
+
+**Status: Fixed.** Nonclustered indexes added on both FK columns.
 
 `Database.ConnectionId`, `Table.DatabaseId`, and `LoadWatermark`'s lookup pair have no supporting
 nonclustered index. Low impact at today's likely table counts, but free to fix now.
@@ -407,6 +472,8 @@ noted above.
 ### 1. `dedupe_keep_latest` cleansing rule is neutralized by an earlier blind dedupe
 
 *Severity: high*
+
+**Status: Fixed.** Blind `dropDuplicates` now skipped when a `dedupe_keep_latest` rule is configured.
 
 `NB_LOAD_BRONZE` runs `clean_df.dropDuplicates(primary_keys)` **before** the `CleansingRules` loop
 that implements `dedupe_keep_latest` (an ordered `Window`-based rule choosing the row with the
@@ -426,6 +493,8 @@ source of truth for which row survives.
 
 *Severity: high*
 
+**Status: Fixed.** Empty Full-load result against an existing table now raises instead of overwriting.
+
 `LoadType='Full'` always does an unconditional `mode("overwrite")` with no row-count check. If a
 day's landing file is empty (an upstream job that runs but produces zero rows, a truncated file,
 a source-side connectivity blip) this overwrites a previously healthy Bronze table with 0 rows —
@@ -441,6 +510,8 @@ per-table for the legitimate cases where an empty Full extract is expected.
 
 *Severity: medium*
 
+**Status: Fixed.** Recency-guarded `whenMatchedUpdate` when `IncrementalColumn` is set.
+
 The Delta upsert merges on primary-key equality only and unconditionally overwrites every matched
 column with the incoming value — no comparison against `IncrementalColumn`. A resent/out-of-order
 batch (a watermark reset, a backfill, a source-side retry re-emitting a stale snapshot) silently
@@ -454,6 +525,8 @@ set.
 
 *Severity: medium*
 
+**Status: Fixed.** `clean_df` cached after cleansing, unpersisted per entity.
+
 The same lazily-built `clean_df` is consumed by the merge, a `.count()` used only for a log line,
 and the watermark's `.agg(...).collect()` — each re-executing the full lineage from the source
 read (including CSV `inferSchema=true`, itself a full extra pass). Unnoticeable on demo-sized
@@ -465,6 +538,8 @@ steps; `unpersist()` at the end of each entity iteration.
 ### 5. Reconcile does a full unbounded scan of both tables on every run
 
 *Severity: medium*
+
+**Status: Partially fixed.** Reconcile failures no longer fail an otherwise-successful load (isolated into a separate warning list) — the underlying full-table-scan cost itself remains open, as flagged in the original finding.
 
 `_reconcile_deletes` reads every primary key out of the *entire* Bronze table and issues an
 unfiltered `SELECT` against the *entire* source table, every single run — O(target + source) work
@@ -480,6 +555,8 @@ full-table scan each time. Log Reconcile-step failures distinctly from load fail
 ### 6. Schema-drift handling is inconsistent and undocumented between Full and Delta
 
 *Severity: low*
+
+**Status: Fixed.** Delta schema auto-merge scoped narrowly around the merge call.
 
 Full-load tables silently accept any schema drift (`overwriteSchema=true` resets the table's
 schema every run with no warning). Delta-load tables set no schema-merge option at all, so a new
@@ -499,6 +576,8 @@ type and a hard, repeating failure on the other.
 
 *Severity: high*
 
+**Status: Fixed.** FK auto-mapping now filters to the current row when `IS_CURRENT_COL` exists on the dimension.
+
 `_discover_and_map_foreign_keys` never filters on `IS_CURRENT_COL` when joining a fact's `_key`
 column against a dimension table. Harmless for SCD1 (one row per business key) — but
 `write_dimension_type2` deliberately keeps multiple physical rows per business key (an expired
@@ -516,6 +595,8 @@ structure structurally cannot catch this class of bug.
 ### 2. `full_refresh` on an existing dimension silently reassigns every surrogate key, and for SCD2 drops history
 
 *Severity: high*
+
+**Status: Fixed.** Both `write_dimension_type1`/`type2` now preserve existing surrogate keys (and, for SCD2, history) across a `full_refresh` on an existing table.
 
 `full_refresh=True` on a table that already exists still routes through `_generate_surrogate_key`'s
 "existing table" branch, which assigns **every** row — including members that already existed — a
@@ -540,6 +621,8 @@ so history survives.
 
 *Severity: medium*
 
+**Status: Fixed.** `_generate_surrogate_key` now uses a deterministic `row_number()` sequence instead of `monotonically_increasing_id()`.
+
 Spark's documented semantics for this function: values pack the partition index into the upper
 bits, unique and increasing but not contiguous. The demo's tiny single-file CSV likely lands in
 one partition, rendering small consecutive-looking integers and masking the real behavior. At real
@@ -556,6 +639,8 @@ unrelated rows can silently collide onto the same key.
 
 *Severity: medium*
 
+**Status: Fixed.** Unmatched-to-Unknown rows are now counted and logged with sample keys.
+
 When a dimension table doesn't exist at all, `_discover_and_map_foreign_keys` prints an explicit
 warning. But when the table exists and a specific business-key *value* simply has no match — the
 far more common real-world case — the code silently coalesces to the Unknown key with zero
@@ -569,6 +654,8 @@ back to Unknown, printed alongside the existing "no dimension table found" warni
 ### 5. The `%run`-per-table chaining pattern has no parallelism, no ordering validation, and a shared global namespace
 
 *Severity: medium*
+
+**Status: Deferred, by design.** This is explicitly future-scale advice ("past a handful of Gold tables...") against a 2-table demo, not a bug to fix today — not attempted this pass.
 
 `NB_LOAD_GOLD`'s own docstring is explicit that Gold is "deliberately NOT metadata-loop-driven" —
 every object gets its own hand-written notebook, `%run`-chained together. For a real client's
@@ -590,6 +677,8 @@ already exist, raising instead of silently coalescing to Unknown.
 
 *Severity: medium*
 
+**Status: Fixed.** `key_columns` parameter added to `load_dimension`/`write_dimension_type1`/`type2`, with an explicit error when no primary key can be determined.
+
 Primary-key inference is 100% dependent on a `_key` column-name suffix convention, with no
 `key_columns` parameter on `load_dimension()`'s signature at all (unlike `load_fact()`, which does
 expose one). If a client's source keeps its native key column name instead of renaming it to fit
@@ -604,6 +693,8 @@ keys can be determined.
 
 *Severity: medium*
 
+**Status: Fixed.** `write_silver_table()` added to `NB_MONZA_FUNCTIONS`, adopted by `sil_customer`.
+
 Gold has a rich facade (`write_dimension_type1/2`, `load_fact` with 5 write modes); Silver's only
 shared helper is `_ensure_schema`. `sil_customer` writes with a bare `saveAsTable(...)` and invents
 its own audit column (`silver_loaded_datetime`) instead of reusing `_append_audit_timestamps()` —
@@ -617,6 +708,8 @@ aren't fully bespoke.
 ### 8. Redundant `.count()` after `saveAsTable()` in the Silver template
 
 *Severity: low*
+
+**Status: Fixed.** `sil_customer` now calls `write_silver_table()`; the redundant `.count()` is gone.
 
 `sil_customer`'s `print(f"wrote {silver_df.count()} rows...")` after an uncached write forces a
 full redundant re-scan purely to print a row count. Harmless on demo data, but `sil_customer` is

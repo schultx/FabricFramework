@@ -1,0 +1,59 @@
+# Shared per-environment deploy steps for azure-pipelines.yml's Dev/Test/Prod stages
+# (Improvement-Roadmap.md, CI/CD #7 -- the three stages used to be 100% duplicated YAML).
+# A pipeline-wide change (dependency bump, auth flow, etc.) now only has to be made here.
+#
+# Parameters:
+#   envArg             -- value passed to run_notebook.py's --environment flag
+#                          (development | test | production)
+#   adoEnvironment     -- ADO Environment (Pipelines -> Environments) gating this stage,
+#                          e.g. fabricframework-dev
+#   displayNameSuffix  -- human-readable label used in step displayNames, e.g. "development"
+
+parameters:
+  - name: envArg
+    type: string
+  - name: adoEnvironment
+    type: string
+  - name: displayNameSuffix
+    type: string
+
+jobs:
+  - deployment: Deploy_${{ parameters.envArg }}
+    environment: ${{ parameters.adoEnvironment }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+            - task: UsePythonVersion@0
+              inputs: { versionSpec: '3.11' }
+            - script: pip install -r deploy/requirements.txt
+              displayName: Install dependencies
+            - script: python deploy/run_notebook.py --environment ${{ parameters.envArg }} --commit $(Build.SourceVersion)
+              displayName: Run NB_DEPLOY (${{ parameters.displayNameSuffix }})
+              env:
+                FABRIC_CLIENT_ID: $(FABRIC_CLIENT_ID)
+                # TODO (CI/CD #1 -- WIF migration, NOT done yet): the fabricframework-<env>-wif
+                # service connections have been provisioned (see Deployment-Guide.md, "Setting up
+                # WIF") but this pipeline still authenticates every stage with this one shared
+                # FABRIC_CLIENT_SECRET from the fabric-framework-secrets variable group instead of
+                # using them. Cutting over means replacing this env: block with a real
+                # serviceConnection-based step, roughly:
+                #
+                #   - task: AzureCLI@2
+                #     inputs:
+                #       azureSubscription: fabricframework-${{ parameters.envArg }}-wif
+                #       scriptType: bash
+                #       scriptLocation: inlineScript
+                #       inlineScript: |
+                #         python deploy/run_notebook.py --environment ${{ parameters.envArg }} --commit $(Build.SourceVersion)
+                #
+                # and swapping run_notebook.py's get_token() from MSAL client-secret auth to a
+                # federated-token flow (msal ConfidentialClientApplication with a signed-assertion
+                # callback instead of client_credential) -- see Deployment-Guide.md for the full
+                # writeup. FABRIC_CLIENT_SECRET should then be deleted from the variable group so
+                # the secret is actually retired, not just unused.
+                FABRIC_CLIENT_SECRET: $(FABRIC_CLIENT_SECRET)
+                FABRIC_TENANT_ID: $(FABRIC_TENANT_ID)
+                FABRIC_WORKSPACE_ID: $(FABRIC_WORKSPACE_ID)
+                FABRIC_NOTEBOOK_ID: $(FABRIC_NOTEBOOK_ID)

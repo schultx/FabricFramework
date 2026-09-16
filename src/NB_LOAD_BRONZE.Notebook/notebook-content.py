@@ -226,6 +226,7 @@ landing_id = resolve_lakehouse_id(data_ws_id, "Landing")
 # failure notifications this framework now relies on for alerting.
 run_guid = start_notebook_run("NB_LOAD_BRONZE")
 failed_entities = []
+reconcile_failed_entities = []
 
 for entity in entities:
     # A bad table (malformed file, schema mismatch, whatever) shouldn't take
@@ -250,7 +251,15 @@ for entity in entities:
         # (DeleteHandling='SoftDelete') needs no special handling here -- it just
         # rides along as an ordinary column already present in raw_df. ----
         clean_df = raw_df.dropna(subset=primary_keys)
-        clean_df = clean_df.dropDuplicates(primary_keys)
+
+        # A dedupe_keep_latest rule (ordered window-function pick, below) is the
+        # sole dedup mechanism when one is configured for this entity -- running
+        # a blind, order-undefined dropDuplicates() first would neutralize it by
+        # collapsing to one arbitrary row per key before the ordered rule ever
+        # gets a chance to run.
+        has_dedupe_keep_latest = any(rule.get("type") == "dedupe_keep_latest" for rule in cleansing_rules)
+        if not has_dedupe_keep_latest:
+            clean_df = clean_df.dropDuplicates(primary_keys)
 
         for rule in cleansing_rules:
             rule_type = rule.get("type")
@@ -274,43 +283,97 @@ for entity in entities:
         target_table = f"Bronze.{entity['BronzeSchema']}.{entity['BronzeName']}"
         table_exists = spark.catalog.tableExists(target_table)
 
-        if load_type == "Full":
-            # Bronze exactly mirrors the latest full extract every run, so source
-            # deletes are handled for free -- Reconcile would be redundant
-            # busywork here, not a bug to "fix", so it's silently skipped even if
-            # DeleteHandling='Reconcile' is misconfigured on a Full table.
-            clean_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(target_table)
-            print(f"   wrote {clean_df.count()} rows to {target_table} (full overwrite)")
+        # clean_df feeds the write/merge below, plus a row-count print and the
+        # watermark's own aggregate -- cache it once so each of those doesn't
+        # re-run the full read+cleanse lineage (incl. CSV inferSchema) from
+        # scratch. Unpersisted in the finally below so it doesn't accumulate
+        # across entities in this loop.
+        clean_df = clean_df.cache()
 
-        elif load_type == "Delta":
-            if not table_exists:
+        try:
+            if load_type == "Full":
+                # Bronze exactly mirrors the latest full extract every run, so source
+                # deletes are handled for free -- Reconcile would be redundant
+                # busywork here, not a bug to "fix", so it's silently skipped even if
+                # DeleteHandling='Reconcile' is misconfigured on a Full table.
+                if table_exists and clean_df.isEmpty():
+                    raise RuntimeError(
+                        f"Full-load source for '{entity['BronzeName']}' produced 0 rows, but "
+                        f"{target_table} already exists -- refusing to overwrite an existing "
+                        f"Bronze table with an empty result."
+                    )
                 clean_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(target_table)
-                print(f"   wrote {clean_df.count()} rows to {target_table} (first load)")
+                print(f"   wrote {clean_df.count()} rows to {target_table} (full overwrite)")
+
+            elif load_type == "Delta":
+                if not table_exists:
+                    clean_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(target_table)
+                    print(f"   wrote {clean_df.count()} rows to {target_table} (first load)")
+                else:
+                    delta_table = DeltaTable.forName(spark, target_table)
+                    merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in primary_keys)
+                    update_dict = {col: f"source.{col}" for col in clean_df.columns}
+                    incremental_col = entity["IncrementalColumn"]
+
+                    merge_builder = delta_table.alias("target").merge(clean_df.alias("source"), merge_conditions)
+                    if incremental_col and incremental_col in clean_df.columns:
+                        # Recency guard: only let an incoming row overwrite Bronze's
+                        # current value when it's at least as new, so a resent/
+                        # out-of-order batch (watermark reset, backfill, source-side
+                        # retry replaying a stale snapshot) can't clobber newer data.
+                        merge_builder = merge_builder.whenMatchedUpdate(
+                            condition=f"source.{incremental_col} >= target.{incremental_col}",
+                            set=update_dict
+                        )
+                    else:
+                        merge_builder = merge_builder.whenMatchedUpdate(set=update_dict)
+
+                    # Scoped narrowly to just this merge: absorb new source columns
+                    # the same way Full's overwriteSchema=true already does, instead
+                    # of a hard, repeating Delta schema-mismatch failure on every run
+                    # after a routine source schema change.
+                    spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+                    try:
+                        merge_builder.whenNotMatchedInsertAll().execute()
+                    finally:
+                        spark.conf.unset("spark.databricks.delta.schema.autoMerge.enabled")
+                    print(f"   merged {clean_df.count()} rows into {target_table}")
+
+                if entity["IncrementalColumn"] and entity["IncrementalColumn"] in clean_df.columns:
+                    max_value = clean_df.agg(F.max(entity["IncrementalColumn"])).collect()[0][0]
+                    if max_value is not None:
+                        _update_watermark(entity["TableId"], str(max_value))
+                        print(f"   watermark advanced to {max_value}")
+
+                if delete_handling == "Reconcile":
+                    # Isolated from the main load: the merge and watermark above
+                    # have already succeeded by this point, so a Reconcile-only
+                    # failure (e.g. a transient source-connection hiccup during its
+                    # full-table scan) shouldn't mark this entity as failed --
+                    # logged distinctly instead.
+                    try:
+                        _reconcile_deletes(entity, primary_keys, target_table)
+                    except Exception as reconcile_exc:
+                        print(f"   WARNING: Reconcile step failed for '{entity['BronzeName']}': {reconcile_exc!r} "
+                              f"-- merge and watermark already succeeded, not marking this table as failed")
+                        reconcile_failed_entities.append(entity["BronzeName"])
+
             else:
-                delta_table = DeltaTable.forName(spark, target_table)
-                merge_conditions = " AND ".join(f"target.{pk} = source.{pk}" for pk in primary_keys)
-                update_dict = {col: f"source.{col}" for col in clean_df.columns}
-                delta_table.alias("target").merge(clean_df.alias("source"), merge_conditions) \
-                    .whenMatchedUpdate(set=update_dict) \
-                    .whenNotMatchedInsertAll() \
-                    .execute()
-                print(f"   merged {clean_df.count()} rows into {target_table}")
-
-            if entity["IncrementalColumn"] and entity["IncrementalColumn"] in clean_df.columns:
-                max_value = clean_df.agg(F.max(entity["IncrementalColumn"])).collect()[0][0]
-                if max_value is not None:
-                    _update_watermark(entity["TableId"], str(max_value))
-                    print(f"   watermark advanced to {max_value}")
-
-            if delete_handling == "Reconcile":
-                _reconcile_deletes(entity, primary_keys, target_table)
-
-        else:
-            raise ValueError(f"Invalid LoadType '{load_type}' for table '{entity['BronzeName']}'. Must be 'Full' or 'Delta'.")
+                raise ValueError(f"Invalid LoadType '{load_type}' for table '{entity['BronzeName']}'. Must be 'Full' or 'Delta'.")
+        finally:
+            clean_df.unpersist()
 
     except Exception as exc:
         print(f"   ERROR loading '{entity['BronzeName']}': {exc!r} -- continuing with remaining tables")
         failed_entities.append(entity["BronzeName"])
+
+if reconcile_failed_entities:
+    # Reconcile-only failures never flip the run's overall status -- the merge
+    # and watermark for each of these tables already succeeded, so they're
+    # surfaced here as a distinct warning rather than folded into
+    # failed_entities below.
+    print(f"WARNING: Reconcile step failed for {len(reconcile_failed_entities)} of {len(entities)} "
+          f"table(s) (load itself succeeded for these): {reconcile_failed_entities}")
 
 if failed_entities:
     error_message = f"{len(failed_entities)} of {len(entities)} table(s) failed: {failed_entities}"
