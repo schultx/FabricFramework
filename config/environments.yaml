@@ -28,17 +28,17 @@
 environments:
   - name: development
     short: D
-    capacity: fabfabricmsa
+    capacity: Trial-20260916T102156Z-SXyTKCCwy06fHGjMeQxDSA
     include_silver: true
     metadata_connection_guid: ""
   - name: test
     short: T
-    capacity: fabfabricmsa
+    capacity: Trial-20260916T102156Z-SXyTKCCwy06fHGjMeQxDSA
     include_silver: true
     metadata_connection_guid: ""
   - name: production
     short: P
-    capacity: fabfabricmsa
+    capacity: Trial-20260916T102156Z-SXyTKCCwy06fHGjMeQxDSA
     include_silver: true
     metadata_connection_guid: ""
 
